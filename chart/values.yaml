@@ -1,0 +1,34 @@
+replicas: 1
+
+baseDomain: CID.ytsaurus.yandexcloud.net
+
+tokenSecretRef: task-proxy-token
+
+tablePath: //home/task_proxies
+
+# tasks discovery period
+refreshPeriodSeconds: 60
+
+auth:
+  enabled: true
+  cookieName: yc_session
+
+tls:
+  enabled: false
+  certSecretRef: yt-domain-cert
+
+# envoy settings
+proxy:
+  image: envoyproxy/envoy:v1.36-latest
+  resources: {}
+
+# xds/authz settings
+server:
+  image: cr.yandex/crp4sbkc7nqdhb4c3q1b/ytsaurus/task-proxy-server:0.1.1
+  resources: {}
+
+# chart node selector
+nodeSelector: {}
+
+# chart affinity
+affinity: {}
