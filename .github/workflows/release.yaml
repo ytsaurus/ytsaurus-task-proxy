@@ -1,0 +1,15 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'release/0\.[0-9]+\.[0-9]+'
+
+jobs:
+  release:
+    name: Run release
+    uses: ./.github/workflows/subflow_release.yaml
+    secrets: inherit
+    with:
+      release_version: ${GITHUB_REF#refs/*/release/}

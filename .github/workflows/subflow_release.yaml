@@ -1,0 +1,63 @@
+on:
+  workflow_call:
+    inputs:
+      release_version:
+        required: true
+        type: string
+
+jobs:
+  release:
+    name: Run release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: checkout sources
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'server/go.mod'
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v1
+        with:
+          version: v3.11.2
+
+      - name: Docker Hub login
+        shell: bash
+        run: |
+          echo '${{ secrets.DOCKER_HUB_PASSWORD }}' | docker login --username ${{ secrets.DOCKER_HUB_LOGIN}} --password-stdin
+
+      # Uses the `docker/login-action` action to log in to the Container registry
+      # using the account and password that will publish the packages.
+      # Once published, the packages are scoped to the account defined here.
+      - name: Guthub Packages Login
+        uses: docker/login-action@v3.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set release version env variable
+        run: |
+          echo "RELEASE_VERSION=${{ inputs.release_version }}" >> "$GITHUB_ENV"
+
+      - name: Update chart version
+        uses: mikefarah/yq@master
+        with:
+          cmd: yq -i '.version=strenv(RELEASE_VERSION) | .appVersion=strenv(RELEASE_VERSION)' chart/Chart.yaml
+
+      - name: Update chart server version
+        uses: mikefarah/yq@master
+        with:
+          cmd: yq -i '.server.image.tag=strenv(RELEASE_VERSION)' chart/values.yaml
+
+      - name: Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          make release RELEASE_VERSION=${{ inputs.release_version }}

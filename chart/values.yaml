@@ -1,0 +1,33 @@
+replicas: 1
+
+baseDomain: my-cluster.ytsaurus.example.net
+
+tokenSecretRef: task-proxy-token
+
+dirPath: //sys/task_proxies
+
+discoveryPeriodSeconds: 60
+
+auth:
+  enabled: true
+  cookieName: YTCypressCookie
+
+tls:
+  enabled: false
+  certSecretRef: yt-domain-cert
+
+proxy:
+  image: 
+    repository: envoyproxy/envoy
+    tag: v1.36-latest
+  resources: {}
+
+server:
+  image: 
+    repository: ghcr.io/ytsaurus/task-proxy
+    tag: ""
+  resources: {}
+
+nodeSelector: {}
+
+affinity: {}

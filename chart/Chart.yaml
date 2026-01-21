@@ -1,0 +1,8 @@
+apiVersion: v2
+name: task-proxy-chart
+description: Helm chart to run YTsaurus task proxy
+type: application
+version: "0.0.0-alpha"
+appVersion: "0.0.0-alpha"
+sources:
+  - https://github.com/ytsaurus/ytsaurus-task-proxy
