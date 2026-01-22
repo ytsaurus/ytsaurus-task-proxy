@@ -56,5 +56,5 @@ release:
 	cd server && GOOS=$(TARGET_OS) GOARCH=$(TARGET_ARCH) go build . && cd ..
 	docker build --platform $(TARGET_OS)/$(TARGET_ARCH) . -t $(REPO)/task-proxy:$(RELEASE_VERSION)
 	docker push $(REPO)/task-proxy:$(RELEASE_VERSION)
-	helm package chart --version $(RELEASE_VERSION)
-	helm push task-proxy-$(RELEASE_VERSION).tgz oci://$(REPO)
+	helm package chart
+	helm push task-proxy-chart-$(RELEASE_VERSION).tgz oci://$(REPO)
