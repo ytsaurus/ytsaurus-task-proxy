@@ -117,7 +117,7 @@ Make request directly to task proxy, using its k8s service endpoint:
 curl \
   -H "Host: 645236d8.my-cluster.ytsaurus.example.net" \
   -H "Authorization: OAuth ${YT_TOKEN}" \
-  "task-proxy.${NAMESPACE}.svc.cluster.local:80"
+  "http://task-proxy.${NAMESPACE}.svc.cluster.local:80"
 ```
 You have to specify service domain in `Host` header so task proxy can route you request to corresponding jobs. Auth can be made by Cypress token, IAM token or auth cookie. We use Cypress token in this example.
 
@@ -125,7 +125,7 @@ If you have some ingress controller, you can make requests over Internet, using 
 ```sh
 curl \
   -H "Authorization: Bearer ${IAM_TOKEN}" \
-  "645236d8.my-cluster.ytsaurus.example.net"
+  "https://645236d8.my-cluster.ytsaurus.example.net"
 ```
 
 To open SPYT UI, just paste service domain in your browser. If you have correct cookies in your `baseDomain`, task proxy will use it to auth your browser request. Auth cookie name is specified in Helm chart values in `auth.cookieName` parameter.
