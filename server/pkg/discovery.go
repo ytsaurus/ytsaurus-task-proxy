@@ -29,31 +29,34 @@ func (d *TaskDiscovery) Discovery(ctx context.Context) (TaskList, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	d.Logger.Debugf("found %d running operations", len(result.Operations))
+
 	for _, op := range result.Operations {
 		title := parseOperationTitle(op)
 		annotations := op.RuntimeParameters.Annotations
 
-		var tasks []Task
+		var opTasks []Task
 		if strings.HasPrefix(title, "Spark driver for") {
-			tasks, err = processSPYTdirectSubmitOperation(op)
+			opTasks, err = processSPYTdirectSubmitOperation(op)
 			if err != nil {
-				d.Logger.Errorf("Unable to process SPYT direct submit operation %q: %v", op.ID, err)
+				d.Logger.Errorf("unable to process SPYT direct submit operation %q: %v", op.ID, err)
 				continue
 			}
 		} else if annotations["is_spark"] == true {
-			tasks, err = d.processSPYTstandloneClusterOperation(ctx, op)
+			opTasks, err = d.processSPYTstandloneClusterOperation(ctx, op)
 			if err != nil {
-				d.Logger.Errorf("Unable to process SPYT standalone cluster operation %q: %v", op.ID, err)
+				d.Logger.Errorf("unable to process SPYT standalone cluster operation %q: %v", op.ID, err)
 				continue
 			}
 		} else if _, ok := annotations["task_proxy"]; ok {
-			tasks, err = d.processTaskProxyAnnotatedOperation(ctx, op)
+			opTasks, err = d.processTaskProxyAnnotatedOperation(ctx, op)
 			if err != nil {
-				d.Logger.Errorf("Unable to process task proxy annotated operation %q: %v", op.ID, err)
+				d.Logger.Errorf("unable to process task proxy annotated operation %q: %v", op.ID, err)
 				continue
 			}
 		}
-		tasks = append(tasks, tasks...)
+		tasks = append(tasks, opTasks...)
 	}
 	return tasks, nil
 }
