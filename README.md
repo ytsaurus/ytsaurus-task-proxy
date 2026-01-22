@@ -95,8 +95,8 @@ yt vanilla \
 
 Task proxy server discovers such operations and write their services data in table, which path is specified in Helm chart's values by `tablePath` parameter. Here is the example of data in table, each row describes single service:
 
-| __domain__                                             | __operation_id__                  |  __task_name__      | __service__ | __protocol__ |
-|--------------------------------------------------------|-----------------------------------|---------------------|-------------|--------------|
+| __domain__                               | __operation_id__                  |  __task_name__      | __service__ | __protocol__ |
+|------------------------------------------|-----------------------------------|---------------------|-------------|--------------|
 | 645236d8.my-cluster.ytsaurus.example.net | a6e04b98-bf982394-5103e8-55754a49 | example_http_server | port_0      | http         |
 | ae5cf6f5.my-cluster.ytsaurus.example.net | a8ef7695-3de07913-5103e8-e29a6707 | example_grpc_server | server      | grpc         |
 | 2ef4261c.my-cluster.ytsaurus.example.net | a6e04b98-bf982394-5103e8-55754a49 | master              | ui          | http         |
