@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: envoy
-        image: {{ .Values.proxy.image }}
+        image: {{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}
         args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "edge-proxy"]
         ports:
         - name: http
@@ -46,7 +46,7 @@ spec:
           {{ toYaml . | nindent 10 }}
         {{- end }}
       - name: server
-        image: {{ .Values.server.image }}
+        image: {{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}
         command: ["./server"]
         args:
         - "-yt-token-path=/etc/yt/token" 
