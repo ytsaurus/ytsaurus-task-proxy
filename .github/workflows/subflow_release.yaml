@@ -41,15 +41,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set release version env variable
+        run: |
+          echo "RELEASE_VERSION=${{ inputs.release_version }}" >> "$GITHUB_ENV"
+
       - name: Update chart version
         uses: mikefarah/yq@master
         with:
-          cmd: yq -i '.version=${{ inputs.release_version }} | .appVersion=${{ inputs.release_version }}' chart/Chart.yaml
+          cmd: yq -i '.version=strenv(RELEASE_VERSION) | .appVersion=strenv(RELEASE_VERSION)' chart/Chart.yaml
 
       - name: Update chart server version
         uses: mikefarah/yq@master
         with:
-          cmd: yq -i '.server.image.tag=${{ inputs.release_version }}' chart/values.yaml
+          cmd: yq -i '.server.image.tag=strenv(RELEASE_VERSION)' chart/values.yaml
 
       - name: Release
         shell: bash
