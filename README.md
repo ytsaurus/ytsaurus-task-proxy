@@ -15,7 +15,7 @@ To address these issues, _task proxy_ component was developed. Task proxy provid
 helm install task-proxy \                
     -n ${NAMESPACE} \                                
     -f values.yaml \
-    oci://ghcr.io/ytsaurus/task-proxy --version ${VERSION}
+    oci://ghcr.io/ytsaurus/task-proxy-chart --version ${VERSION}
 ```
 
 Example of `values.yaml`:
@@ -117,7 +117,7 @@ Make request directly to task proxy, using its k8s service endpoint:
 curl \
   -H "Host: 645236d8.my-cluster.ytsaurus.example.net" \
   -H "Authorization: OAuth ${YT_TOKEN}" \
-  "task-proxy.yt.svc.cluster.local:80"
+  "task-proxy.${NAMESPACE}.svc.cluster.local:80"
 ```
 You have to specify service domain in `Host` header so task proxy can route you request to corresponding jobs. Auth can be made by Cypress token, IAM token or auth cookie. We use Cypress token in this example.
 
@@ -155,7 +155,7 @@ grpcurl \
   -plaintext \
   -authority "ae5cf6f5.my-cluster.ytsaurus.example.net" \
   -H "Authorization: Bearer ${IAM_TOKEN}" \
-  "task-proxy.yt.svc.cluster.local:80" \
+  "task-proxy.${NAMESPACE}.svc.cluster.local:80" \
   "helloworld.Greeter/SayHello"
 ```
 
