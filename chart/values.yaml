@@ -19,12 +19,16 @@ tls:
 
 # envoy settings
 proxy:
-  image: envoyproxy/envoy:v1.36-latest
+  image: 
+    repository: envoyproxy/envoy
+    tag: v1.36-latest
   resources: {}
 
 # xds/authz settings
 server:
-  image: cr.yandex/crp4sbkc7nqdhb4c3q1b/ytsaurus/task-proxy-server:0.1.1
+  image: 
+    repository: ghcr.io/ytsaurus/task-proxy
+    tag: ""
   resources: {}
 
 # chart node selector
