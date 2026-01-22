@@ -24,8 +24,8 @@ Example of `values.yaml`:
 tablePath: //home/task_proxies
 
 # Services domains will use this domain as base, adding service hash, 
-# i.e. 645236d8.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net
-baseDomain: cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net
+# i.e. 645236d8.my-cluster.ytsaurus.example.net
+baseDomain: my-cluster.ytsaurus.example.net
 
 # k8s secret name with task proxy user token, see details of how to create such user below
 tokenSecretRef: task-proxy-token
@@ -97,11 +97,11 @@ Task proxy server discovers such operations and write their services data in tab
 
 | __domain__                                             | __operation_id__                  |  __task_name__      | __service__ | __protocol__ |
 |--------------------------------------------------------|-----------------------------------|---------------------|-------------|--------------|
-| 645236d8.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net | a6e04b98-bf982394-5103e8-55754a49 | example_http_server | port_0      | http         |
-| ae5cf6f5.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net | a8ef7695-3de07913-5103e8-e29a6707 | example_grpc_server | server      | grpc         |
-| 2ef4261c.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net | a6e04b98-bf982394-5103e8-55754a49 | master              | ui          | http         |
-| 51a6d485.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net | a6e04b98-bf982394-5103e8-55754a49 | history             | ui          | http         |
-| 37a5f11c.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net | 6699a5a9-37c731e3-5103e8-b05d7dd0 | driver              | ui          | http         |     
+| 645236d8.my-cluster.ytsaurus.example.net | a6e04b98-bf982394-5103e8-55754a49 | example_http_server | port_0      | http         |
+| ae5cf6f5.my-cluster.ytsaurus.example.net | a8ef7695-3de07913-5103e8-e29a6707 | example_grpc_server | server      | grpc         |
+| 2ef4261c.my-cluster.ytsaurus.example.net | a6e04b98-bf982394-5103e8-55754a49 | master              | ui          | http         |
+| 51a6d485.my-cluster.ytsaurus.example.net | a6e04b98-bf982394-5103e8-55754a49 | history             | ui          | http         |
+| 37a5f11c.my-cluster.ytsaurus.example.net | 6699a5a9-37c731e3-5103e8-b05d7dd0 | driver              | ui          | http         |     
 
 - First row represents our [vanilla](https://ytsaurus.tech/docs/en/user-guide/data-processing/operations/vanilla) operation with sample HTTP server.
 - Seconds row describes [sample](examples/grpc-service/) gRPC server, example of how to launch it, using extended task proxy annotation format is below.
@@ -115,7 +115,7 @@ You can make requests to this HTTP server in two ways.
 Make request directly to task proxy, using its k8s service endpoint:
 ```sh
 curl \
-  -H "Host: 645236d8.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net" \
+  -H "Host: 645236d8.my-cluster.ytsaurus.example.net" \
   -H "Authorization: OAuth ${YT_TOKEN}" \
   "task-proxy.yt.svc.cluster.local:80"
 ```
@@ -125,7 +125,7 @@ If you have some ingress controller, you can make requests over Internet, using 
 ```sh
 curl \
   -H "Authorization: Bearer ${IAM_TOKEN}" \
-  "645236d8.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net"
+  "645236d8.my-cluster.ytsaurus.example.net"
 ```
 
 To open SPYT UI, just paste service domain in your browser. If you have correct cookies in your `baseDomain`, task proxy will use it to auth your browser request. Auth cookie name is specified in Helm chart values in `auth.cookieName` parameter.
@@ -153,7 +153,7 @@ Directly to task proxy:
 ```sh
 grpcurl \
   -plaintext \
-  -authority "ae5cf6f5.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net" \
+  -authority "ae5cf6f5.my-cluster.ytsaurus.example.net" \
   -H "Authorization: Bearer ${IAM_TOKEN}" \
   "task-proxy.yt.svc.cluster.local:80" \
   "helloworld.Greeter/SayHello"
@@ -163,7 +163,7 @@ Using ingress controller:
 ```sh
 grpcurl \
   -H "Cookie: yc_session ${AUTH_COOKIE_VALUE}" \
-  "ae5cf6f5.cnkajjilrks3ak60nri6.ytsaurus.yandexcloud.net:9090" \
+  "ae5cf6f5.my-cluster.ytsaurus.example.net:9090" \
   "helloworld.Greeter/SayHello"
 ```
 
