@@ -42,18 +42,21 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	path := httpAttrs.GetPath()
 	headers := httpAttrs.GetHeaders()
 
-	host := httpAttrs.Host
-	if host == "" {
-		s.logger.Warnf("authority (host) header is missing in request")
+	var hash string
+	if routerHeaderValue, ok := httpAttrs.Headers[routerHeaderName]; ok {
+		hash = routerHeaderValue
+	} else if host := httpAttrs.Host; host != "" {
+		hash = strings.Split(host, ".")[0]
+	} else {
+		s.logger.Warnf("authority (host) or %s headers are missing in request", routerHeaderName)
 		return deniedResponse, nil
 	}
 
-	s.logger.Debugf("checking auth for host %q, path %q", host, path)
+	s.logger.Debugf("checking auth for hash %q, path %q", hash, path)
 
-	hash := strings.Split(host, ".")[0]
 	task, ok := s.getHashToTasks()[hash]
 	if !ok {
-		s.logger.Warnf("no entry for host %q in tasks registry", host)
+		s.logger.Warnf("no entry for hash %q in tasks registry", hash)
 		return deniedResponse, nil
 	}
 
@@ -63,7 +66,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 		return okResponse, nil
 	}
 
-	s.logger.Debugf("auth for host %q, path %q, task %v", host, path, task)
+	s.logger.Debugf("auth for hash %q, path %q, task %v", hash, path, task)
 
 	allowed, err := s.checkOperationPermission(ctx, task.operationID, headers)
 	if err != nil {

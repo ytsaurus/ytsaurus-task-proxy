@@ -28,13 +28,17 @@ import (
 	clustergrpc "github.com/envoyproxy/go-control-plane/envoy/service/cluster/v3"
 	discoverygrpc "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	listenergrpc "github.com/envoyproxy/go-control-plane/envoy/service/listener/v3"
+	matcherv3 "github.com/envoyproxy/go-control-plane/envoy/type/matcher/v3"
 	cachetypes "github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	serverv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 )
 
-const extAuthClusterName = "extAuthz"
+const (
+	extAuthClusterName = "extAuthz"
+	routerHeaderName   = "x-yt-taskproxy-id"
+)
 
 func ServeGRPC(s serverv3.Server, authServer *authServer) error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", serverPort))
@@ -57,6 +61,9 @@ func ServeGRPC(s serverv3.Server, authServer *authServer) error {
 func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string, tls bool, authEnabled bool) (*cachev3.Snapshot, error) {
 	var clusters []cachetypes.Resource
 	var vhosts []*routev3.VirtualHost
+
+	var defaultVhostRoutes []*routev3.Route
+
 	for hash, task := range hashToTask {
 		grpc := task.protocol == "grpc"
 		vhostName := fmt.Sprintf("%s-%s-%s", task.operationID, task.taskName, task.service)
@@ -70,39 +77,60 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				Weight: &wrapperspb.UInt32Value{Value: 1},
 			})
 		}
-
+		action := &routev3.Route_Route{
+			Route: &routev3.RouteAction{
+				ClusterSpecifier: &routev3.RouteAction_WeightedClusters{
+					WeightedClusters: &routev3.WeightedCluster{
+						Clusters: vhostClusters,
+					},
+				},
+			},
+		}
+		// route either by domain
 		vhosts = append(vhosts, &routev3.VirtualHost{
 			Name:    vhostName,
 			Domains: []string{getTaskDomain(hash, baseDomain)},
 			Routes: []*routev3.Route{{
-				Match: &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
-				Action: &routev3.Route_Route{
-					Route: &routev3.RouteAction{
-						ClusterSpecifier: &routev3.RouteAction_WeightedClusters{
-							WeightedClusters: &routev3.WeightedCluster{
-								Clusters: vhostClusters,
+				Match:  &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
+				Action: action,
+			}},
+		})
+		// ... or by custom header
+		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+			Match: &routev3.RouteMatch{
+				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
+				Headers: []*routev3.HeaderMatcher{
+					{
+						Name: routerHeaderName,
+						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+							StringMatch: &matcherv3.StringMatcher{
+								MatchPattern: &matcherv3.StringMatcher_Exact{
+									Exact: hash,
+								},
 							},
 						},
 					},
 				},
-			}},
+			},
+			Action: action,
 		})
 	}
 
+	defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+		Match: &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
+		Action: &routev3.Route_DirectResponse{
+			DirectResponse: &routev3.DirectResponseAction{
+				Status: 404,
+				Body: &corev3.DataSource{
+					Specifier: &corev3.DataSource_InlineString{InlineString: "no such task"},
+				},
+			},
+		},
+	})
 	vhosts = append(vhosts, &routev3.VirtualHost{
 		Name:    "vhost_default",
 		Domains: []string{"*"},
-		Routes: []*routev3.Route{{
-			Match: &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
-			Action: &routev3.Route_DirectResponse{
-				DirectResponse: &routev3.DirectResponseAction{
-					Status: 404,
-					Body: &corev3.DataSource{
-						Specifier: &corev3.DataSource_InlineString{InlineString: "no such task"},
-					},
-				},
-			},
-		}},
+		Routes:  defaultVhostRoutes,
 	})
 
 	if authEnabled {
