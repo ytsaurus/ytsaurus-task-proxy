@@ -136,6 +136,15 @@ curl \
 
 To open SPYT UI, just paste service domain in your browser. If you have correct cookies in your `baseDomain`, task proxy will use it to auth your browser request. Auth cookie name is specified in Helm chart values in `auth.cookieName` parameter.
 
+You can also use header `x-yt-taskproxy-id` with left part of domain as value (`645236d8` in our example) as alternative way of routing instead of domain. It is suitable in situations
+then using domain is not possible, i.e. when your infrastructure doesn't support wildcard domains:
+```sh
+curl \
+  -H "Authorization: Bearer ${IAM_TOKEN}" \
+  -H "x-yt-taskproxy-id: 645236d8" \
+  "https://task-proxy.my-cluster.ytsaurus.example.net"
+```
+
 ## Extended task proxy annotation format
 
 Annotation `task_proxy={enabled=%true}` is minimal required format. Using it, each service given port indexes in order of task appearance and default service names `port_${PORT_INDEX}`, as well as `HTTP` protocol. If you want to specify service names, which port index they use and protocol, you can use extended annotation format.
