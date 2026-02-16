@@ -3,6 +3,7 @@ package pkg
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -19,12 +20,15 @@ type HostPort struct {
 }
 
 type Task struct {
-	operationID string
-	taskName    string
-	service     string
-	protocol    Protocol
-	jobs        []HostPort
+	operationID    string
+	operationAlias string
+	taskName       string
+	service        string
+	protocol       Protocol
+	jobs           []HostPort
 }
+
+var valueRegexp = regexp.MustCompile(`^[a-z0-9]+$`)
 
 // Identifies task, for sorting and domain hash
 func (t *Task) ID() string {
@@ -42,6 +46,35 @@ func (t *Task) IDWithHostPort() string {
 	return sb.String()
 }
 
+func (t *Task) Validate() error {
+	if t.operationAlias == "" {
+		return nil
+	}
+	// to avoid collisions in alias domains, we should check some fields on regexp
+	for _, f := range []struct {
+		value string
+		name  string
+	}{
+		{
+			value: t.operationAlias,
+			name:  "operationAlias",
+		},
+		{
+			value: t.taskName,
+			name:  "taskName",
+		},
+		{
+			value: t.service,
+			name:  "service",
+		},
+	} {
+		if !valueRegexp.MatchString(f.value) {
+			return fmt.Errorf("field %q value %q does not match regexp %q", f.name, f.value, valueRegexp.String())
+		}
+	}
+	return nil
+}
+
 type TaskRow struct {
 	OperationID string `yson:"operation_id"`
 	TaskName    string `yson:"task_name"`
@@ -50,8 +83,12 @@ type TaskRow struct {
 	Domain      string `yson:"domain"`
 }
 
-func getTaskDomain(taskHash, baseDomain string) string {
-	return taskHash + "." + baseDomain
+func getTaskHashDomain(taskHash, baseDomain string) string {
+	return fmt.Sprintf("%s.%s", taskHash, baseDomain)
+}
+
+func getTaskAliasDomain(task Task, baseDomain string) string {
+	return fmt.Sprintf("%s-%s-%s.%s", task.operationAlias, task.taskName, task.service, baseDomain)
 }
 
 func Hash(source []byte) string {
