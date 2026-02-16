@@ -86,10 +86,14 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				},
 			},
 		}
-		// route either by domain
+		domains := []string{getTaskHashDomain(hash, baseDomain)}
+		if task.operationAlias != "" {
+			domains = append(domains, getTaskAliasDomain(task, baseDomain))
+		}
+		// route either by domain(-s)
 		vhosts = append(vhosts, &routev3.VirtualHost{
 			Name:    vhostName,
-			Domains: []string{getTaskDomain(hash, baseDomain)},
+			Domains: domains,
 			Routes: []*routev3.Route{{
 				Match:  &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
 				Action: action,

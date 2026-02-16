@@ -19,11 +19,12 @@ type HostPort struct {
 }
 
 type Task struct {
-	operationID string
-	taskName    string
-	service     string
-	protocol    Protocol
-	jobs        []HostPort
+	operationID    string
+	operationAlias string
+	taskName       string
+	service        string
+	protocol       Protocol
+	jobs           []HostPort
 }
 
 // Identifies task, for sorting and domain hash
@@ -50,8 +51,12 @@ type TaskRow struct {
 	Domain      string `yson:"domain"`
 }
 
-func getTaskDomain(taskHash, baseDomain string) string {
-	return taskHash + "." + baseDomain
+func getTaskHashDomain(taskHash, baseDomain string) string {
+	return fmt.Sprintf("%s.%s", taskHash, baseDomain)
+}
+
+func getTaskAliasDomain(task Task, baseDomain string) string {
+	return fmt.Sprintf("%s-%s-%s.%s", task.operationAlias, task.taskName, task.service, baseDomain)
 }
 
 func Hash(source []byte) string {
