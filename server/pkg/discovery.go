@@ -150,7 +150,7 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 		{
 			taskName: "master",
 			dir:      "rest",
-			service:  "rest-api",
+			service:  "rest",
 		},
 		{
 			taskName: "history",
