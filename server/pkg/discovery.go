@@ -140,14 +140,22 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 	for _, t := range []struct {
 		taskName string
 		dir      string
+		service  string
 	}{
 		{
 			taskName: "master",
 			dir:      "webui",
+			service:  "ui",
+		},
+		{
+			taskName: "master",
+			dir:      "rest",
+			service:  "rest-api",
 		},
 		{
 			taskName: "history",
 			dir:      "shs",
+			service:  "ui",
 		},
 	} {
 		var nodes []string
@@ -172,7 +180,7 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 		tasks = append(tasks, Task{
 			operationID: op.ID.String(),
 			taskName:    t.taskName,
-			service:     "ui",
+			service:     t.service,
 			jobs:        jobs,
 			protocol:    HTTP,
 		})
