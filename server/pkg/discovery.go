@@ -233,7 +233,7 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 			}
 			if serviceInfo == nil {
 				serviceInfo = &taskServiceInfo{
-					service:  fmt.Sprintf("port_%d", i),
+					service:  fmt.Sprintf("port%d", i),
 					protocol: HTTP,
 				}
 			}
@@ -260,7 +260,11 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 
 	var tasks []Task
 	for _, task := range idToTask {
-		tasks = append(tasks, *task)
+		if err := task.Validate(); err != nil {
+			d.logger.Warnf("invalid task %v: %v", task, err)
+		} else {
+			tasks = append(tasks, *task)
+		}
 	}
 	return tasks, nil
 }

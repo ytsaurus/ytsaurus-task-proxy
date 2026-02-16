@@ -3,6 +3,7 @@ package pkg
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -27,6 +28,8 @@ type Task struct {
 	jobs           []HostPort
 }
 
+var valueRegexp = regexp.MustCompile(`^[a-z0-9]+$`)
+
 // Identifies task, for sorting and domain hash
 func (t *Task) ID() string {
 	return t.operationID + t.taskName + t.service
@@ -41,6 +44,35 @@ func (t *Task) IDWithHostPort() string {
 		fmt.Fprintf(&sb, "%d", job.port)
 	}
 	return sb.String()
+}
+
+func (t *Task) Validate() error {
+	if t.operationAlias == "" {
+		return nil
+	}
+	// to avoid collisions in alias domains, we should check some fields on regexp
+	for _, f := range []struct {
+		value string
+		name  string
+	}{
+		{
+			value: t.operationAlias,
+			name:  "operationAlias",
+		},
+		{
+			value: t.taskName,
+			name:  "taskName",
+		},
+		{
+			value: t.service,
+			name:  "service",
+		},
+	} {
+		if !valueRegexp.MatchString(f.value) {
+			return fmt.Errorf("field %q value %q does not match regexp %q", f.name, f.value, valueRegexp.String())
+		}
+	}
+	return nil
 }
 
 type TaskRow struct {
