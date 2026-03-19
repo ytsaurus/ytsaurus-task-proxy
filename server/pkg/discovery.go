@@ -101,11 +101,12 @@ func processSPYTDirectSubmitOperation(op ytsdk.OperationStatus) ([]Task, error) 
 	}
 	return []Task{
 		{
-			operationID: op.ID.String(),
-			taskName:    "driver",
-			service:     "ui",
-			jobs:        []HostPort{*hostPort},
-			protocol:    HTTP,
+			operationID:    op.ID.String(),
+			operationAlias: parseOperationAlias(op),
+			taskName:       "driver",
+			service:        "ui",
+			jobs:           []HostPort{*hostPort},
+			protocol:       HTTP,
 		},
 	}, nil
 }
@@ -178,11 +179,12 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 		}
 
 		tasks = append(tasks, Task{
-			operationID: op.ID.String(),
-			taskName:    t.taskName,
-			service:     t.service,
-			jobs:        jobs,
-			protocol:    HTTP,
+			operationID:    op.ID.String(),
+			operationAlias: parseOperationAlias(op),
+			taskName:       t.taskName,
+			service:        t.service,
+			jobs:           jobs,
+			protocol:       HTTP,
 		})
 	}
 	return tasks, nil
@@ -231,17 +233,18 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 			}
 			if serviceInfo == nil {
 				serviceInfo = &taskServiceInfo{
-					service:  fmt.Sprintf("port_%d", i),
+					service:  fmt.Sprintf("port%d", i),
 					protocol: HTTP,
 				}
 			}
 			hostParts := strings.Split(job.Address, ":") // job address contains port also
 
 			taskProto := Task{
-				operationID: op.ID.String(),
-				taskName:    job.TaskName,
-				service:     serviceInfo.service,
-				protocol:    serviceInfo.protocol,
+				operationID:    op.ID.String(),
+				operationAlias: parseOperationAlias(op),
+				taskName:       job.TaskName,
+				service:        serviceInfo.service,
+				protocol:       serviceInfo.protocol,
 			}
 			if _, ok := idToTask[taskProto.ID()]; !ok {
 				idToTask[taskProto.ID()] = &taskProto
@@ -257,7 +260,11 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 
 	var tasks []Task
 	for _, task := range idToTask {
-		tasks = append(tasks, *task)
+		if err := task.Validate(); err != nil {
+			d.logger.Warnf("invalid task %v: %v", task, err)
+		} else {
+			tasks = append(tasks, *task)
+		}
 	}
 	return tasks, nil
 }
@@ -283,7 +290,7 @@ func (d *taskDiscovery) save(ctx context.Context, hashToTask map[string]Task) er
 			TaskName:    task.taskName,
 			Service:     task.service,
 			Protocol:    string(task.protocol),
-			Domain:      getTaskDomain(hash, d.baseDomain),
+			Domain:      getTaskHashDomain(hash, d.baseDomain),
 		})
 		if err != nil {
 			return err
@@ -445,4 +452,16 @@ func parseOperationTitle(op ytsdk.OperationStatus) string {
 		return ""
 	}
 	return title
+}
+
+func parseOperationAlias(op ytsdk.OperationStatus) string {
+	aliasAny, ok := op.BriefSpec["alias"]
+	if !ok {
+		return ""
+	}
+	alias, ok := aliasAny.(string)
+	if !ok {
+		return ""
+	}
+	return alias[1:] // YT operation alias must start with '*', but we skip it to use alias in domains
 }
