@@ -35,13 +35,18 @@ func CreateTaskUpdater(
 	}
 }
 
-func (u *taskUpdater) Update(ctx context.Context, hashToTask map[string]Task, version string) error {
+func (u *taskUpdater) Update(
+	ctx context.Context,
+	hashToTask map[string]Task,
+	operationAliasToID map[string]string,
+	version string,
+) error {
 	snapshot, err := makeSnapshot(hashToTask, version, u.baseDomain, u.tls, u.authEnabled)
 	if err != nil {
 		return fmt.Errorf("failed to make snapshot: %v", err)
 	}
 
-	u.authServer.SetHashToTasks(hashToTask)
+	u.authServer.SetTasksData(hashToTask, operationAliasToID)
 
 	if err := u.cache.SetSnapshot(ctx, NodeID, snapshot); err != nil {
 		return fmt.Errorf("failed to set snapshot: %v", err)

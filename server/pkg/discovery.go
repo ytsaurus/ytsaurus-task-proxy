@@ -307,7 +307,7 @@ func (d *taskDiscovery) listOperations(ctx context.Context) ([]ytsdk.OperationSt
 
 	for {
 		d.logger.Debugf(
-			"loading running operations chunk, limit %d, cursor %s, already loaded %d operations",
+			"loading running operations chunk, limit %d, cursor %v, already loaded %d operations",
 			limit,
 			cursor,
 			len(operations),

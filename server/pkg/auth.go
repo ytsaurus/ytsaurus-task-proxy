@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,12 +19,13 @@ import (
 type authServer struct {
 	authv3.UnimplementedAuthorizationServer
 
-	mx             sync.RWMutex
-	hashToTasks    map[string]Task
-	yt             ytsdk.Client
-	ytProxy        string
-	logger         *SimpleLogger
-	authCookieName string
+	mx                 sync.RWMutex
+	hashToTasks        map[string]Task
+	operationAliasToID map[string]string
+	yt                 ytsdk.Client
+	ytProxy            string
+	logger             *SimpleLogger
+	authCookieName     string
 }
 
 func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string) *authServer {
@@ -41,22 +43,11 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	httpAttrs := req.GetAttributes().GetRequest().GetHttp()
 	path := httpAttrs.GetPath()
 	headers := httpAttrs.GetHeaders()
+	host := httpAttrs.GetHost()
 
-	var hash string
-	if routerHeaderValue, ok := httpAttrs.Headers[routerHeaderName]; ok {
-		hash = routerHeaderValue
-	} else if host := httpAttrs.Host; host != "" {
-		hash = strings.Split(host, ".")[0]
-	} else {
-		s.logger.Warnf("authority (host) or %s headers are missing in request", routerHeaderName)
-		return deniedResponse, nil
-	}
-
-	s.logger.Debugf("checking auth for hash %q, path %q", hash, path)
-
-	task, ok := s.getHashToTasks()[hash]
-	if !ok {
-		s.logger.Warnf("no entry for hash %q in tasks registry", hash)
+	task, err := s.findTaskByRequest(host, headers)
+	if err != nil {
+		s.logger.Warnf("failed to find task during auth check: %s", err)
 		return deniedResponse, nil
 	}
 
@@ -66,7 +57,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 		return okResponse, nil
 	}
 
-	s.logger.Debugf("auth for hash %q, path %q, task %v", hash, path, task)
+	s.logger.Debugf("auth for path %q, task %v", path, task)
 
 	allowed, err := s.checkOperationPermission(ctx, task.operationID, headers)
 	if err != nil {
@@ -80,21 +71,43 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	return okResponse, nil
 }
 
-func (s *authServer) SetHashToTasks(hashToTasks map[string]Task) {
+func (s *authServer) SetTasksData(hashToTasks map[string]Task, operationAliasToID map[string]string) {
 	s.mx.Lock()
 	defer s.mx.Unlock()
 
 	s.hashToTasks = hashToTasks
+	s.operationAliasToID = operationAliasToID
 }
 
-func (s *authServer) getHashToTasks() map[string]Task {
+func (s *authServer) findTaskByRequest(host string, headers map[string]string) (*Task, error) {
 	s.mx.RLock()
 	defer s.mx.RUnlock()
 
-	return s.hashToTasks
+	var hash string
+	if routerHeaderValue, ok := headers[routerHeaderName]; ok {
+		hash = routerHeaderValue
+	} else if host != "" {
+		subdomain := strings.Split(host, ".")[0]
+		if operationAlias, taskName, service, ok := tryParseAliasSubdomain(subdomain); ok {
+			operationID, ok := s.operationAliasToID[operationAlias]
+			if !ok {
+				return nil, fmt.Errorf("operation by alias %q from subdomain was not found", operationAlias)
+			}
+			hash = (&Task{operationID: operationID, taskName: taskName, service: service}).Hash()
+		} else {
+			hash = subdomain
+		}
+	} else {
+		return nil, fmt.Errorf("authority (host) or %s headers are missing in request", routerHeaderName)
+	}
+
+	if task, ok := s.hashToTasks[hash]; !ok {
+		return nil, fmt.Errorf("no entry for hash %q in tasks registry", hash)
+	} else {
+		return &task, nil
+	}
 }
 
-// TODO: temporary implementation, use YT Go SDK instead
 func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
