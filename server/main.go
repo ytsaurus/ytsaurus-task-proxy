@@ -95,10 +95,14 @@ func main() {
 
 			sort.Sort(tasks)
 			hashToTask := make(map[string]pkg.Task)
+			operationAliasToID := make(map[string]string)
 			var buf bytes.Buffer
 			for _, task := range tasks {
 				buf.Write([]byte(task.IDWithHostPort()))
-				hashToTask[pkg.Hash([]byte(task.ID()))] = task
+				hashToTask[task.Hash()] = task
+				if task.OperationAlias() != "" {
+					operationAliasToID[task.OperationAlias()] = task.OperationID()
+				}
 			}
 
 			newVersion := pkg.Hash(buf.Bytes())
@@ -108,7 +112,7 @@ func main() {
 				logger.Infof("%d tasks discovered:\n%s", len(tasks), tasks)
 				version = newVersion
 
-				err = taskUpdater.Update(ctx, hashToTask, version)
+				err = taskUpdater.Update(ctx, hashToTask, operationAliasToID, version)
 				if err != nil {
 					logger.Errorf("failed to update tasks: %v", err)
 					version = "" // drop version so we will retry update on next iteration

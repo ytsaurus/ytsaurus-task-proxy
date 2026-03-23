@@ -28,11 +28,23 @@ type Task struct {
 	jobs           []HostPort
 }
 
-var valueRegexp = regexp.MustCompile(`^[a-z0-9]+$`)
+var valueRegexp = regexp.MustCompile(`^[a-z0-9]{1,30}$`)
 
 // Identifies task, for sorting and domain hash
 func (t *Task) ID() string {
 	return t.operationID + t.taskName + t.service
+}
+
+func (t *Task) Hash() string {
+	return Hash([]byte(t.ID()))
+}
+
+func (t *Task) OperationID() string {
+	return t.operationID
+}
+
+func (t *Task) OperationAlias() string {
+	return t.operationAlias
 }
 
 // ID with jobs (host, port)-s to create correct version for xDS data (jobs can move between hosts)
@@ -91,6 +103,14 @@ func getTaskAliasDomain(task Task, baseDomain string) string {
 	return fmt.Sprintf("%s-%s-%s.%s", task.operationAlias, task.taskName, task.service, baseDomain)
 }
 
+func tryParseAliasSubdomain(subdomain string) (string, string, string, bool) {
+	parts := strings.Split(subdomain, "-")
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
 func Hash(source []byte) string {
 	hash := fmt.Sprintf("%x", sha256.Sum256(source))
 	return hash[len(hash)-8:]
@@ -105,7 +125,7 @@ func (a TaskList) Less(i, j int) bool { return a[i].ID() < a[j].ID() }
 func (a TaskList) String() string {
 	sb := strings.Builder{}
 	for _, task := range a {
-		sb.WriteString(fmt.Sprintf("\t%v\n", task))
+		fmt.Fprintf(&sb, "\t%v\n", task)
 	}
 	return sb.String()
 }
