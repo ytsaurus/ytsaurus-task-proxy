@@ -18,8 +18,8 @@ func TestValidateTask(t *testing.T) {
 			task: Task{
 				operationID:    "123",
 				operationAlias: "alias",
-				taskName:       "task",
-				service:        "service",
+				taskName:       "ta_sk",
+				service:        "service_1",
 			},
 		},
 		{
@@ -30,27 +30,27 @@ func TestValidateTask(t *testing.T) {
 				taskName:       "task",
 				service:        "service",
 			},
-			err: errors.New("field \"operationAlias\" value \"ali-as\" does not match regexp \"^[a-z0-9]{1,30}$\""),
+			err: errors.New("field \"operationAlias\" value \"ali-as\" does not match regexp \"^[a-z0-9_]{1,30}$\""),
 		},
 		{
 			name: "invalid task name",
 			task: Task{
 				operationID:    "123",
-				operationAlias: "alias",
+				operationAlias: "_alias",
 				taskName:       "Task",
 				service:        "service",
 			},
-			err: errors.New("field \"taskName\" value \"Task\" does not match regexp \"^[a-z0-9]{1,30}$\""),
+			err: errors.New("field \"taskName\" value \"Task\" does not match regexp \"^[a-z0-9_]{1,30}$\""),
 		},
 		{
 			name: "invalid service",
 			task: Task{
 				operationID:    "123",
 				operationAlias: "alias",
-				taskName:       "task",
+				taskName:       "ta_sk",
 				service:        "$ervice",
 			},
-			err: errors.New("field \"service\" value \"$ervice\" does not match regexp \"^[a-z0-9]{1,30}$\""),
+			err: errors.New("field \"service\" value \"$ervice\" does not match regexp \"^[a-z0-9_]{1,30}$\""),
 		},
 		{
 			name: "invalid service",
@@ -60,7 +60,7 @@ func TestValidateTask(t *testing.T) {
 				taskName:       "task",
 				service:        "serviceserviceserviceserviceserviceserviceserviceservice",
 			},
-			err: errors.New("field \"service\" value \"serviceserviceserviceserviceserviceserviceserviceservice\" does not match regexp \"^[a-z0-9]{1,30}$\""),
+			err: errors.New("field \"service\" value \"serviceserviceserviceserviceserviceserviceserviceservice\" does not match regexp \"^[a-z0-9_]{1,30}$\""),
 		},
 		{
 			name: "do not check if no alias",
