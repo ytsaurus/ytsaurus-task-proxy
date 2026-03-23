@@ -84,7 +84,7 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 	defer s.mx.RUnlock()
 
 	var hash string
-	if routerHeaderValue, ok := headers[routerHeaderName]; ok {
+	if routerHeaderValue, ok := headers[idRouterHeaderName]; ok {
 		hash = routerHeaderValue
 	} else if host != "" {
 		subdomain := strings.Split(host, ".")[0]
@@ -98,7 +98,7 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 			hash = subdomain
 		}
 	} else {
-		return nil, fmt.Errorf("authority (host) or %s headers are missing in request", routerHeaderName)
+		return nil, fmt.Errorf("authority (host) or %s headers are missing in request", idRouterHeaderName)
 	}
 
 	if task, ok := s.hashToTasks[hash]; !ok {

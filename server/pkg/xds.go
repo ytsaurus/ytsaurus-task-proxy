@@ -37,7 +37,13 @@ import (
 
 const (
 	extAuthClusterName = "extAuthz"
-	routerHeaderName   = "x-yt-taskproxy-id"
+
+	idRouterHeaderName = "x-yt-taskproxy-id" // hash
+
+	operationIDRouterHeaderName    = "x-yt-taskproxy-operation-id"
+	operationAliasRouterHeaderName = "x-yt-taskproxy-operation-alias"
+	taskNameRouterHeaderName       = "x-yt-taskproxy-task-name"
+	serviceRouteHeaderName         = "x-yt-taskproxy-service"
 )
 
 func ServeGRPC(s serverv3.Server, authServer *authServer) error {
@@ -99,13 +105,13 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				Action: action,
 			}},
 		})
-		// ... or by custom header
+		// ... or by custom header(-s)
 		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 			Match: &routev3.RouteMatch{
 				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
 				Headers: []*routev3.HeaderMatcher{
 					{
-						Name: routerHeaderName,
+						Name: idRouterHeaderName,
 						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
 							StringMatch: &matcherv3.StringMatcher{
 								MatchPattern: &matcherv3.StringMatcher_Exact{
@@ -118,6 +124,84 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 			},
 			Action: action,
 		})
+		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+			Match: &routev3.RouteMatch{
+				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
+				Headers: []*routev3.HeaderMatcher{
+					{
+						Name: operationIDRouterHeaderName,
+						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+							StringMatch: &matcherv3.StringMatcher{
+								MatchPattern: &matcherv3.StringMatcher_Exact{
+									Exact: task.operationID,
+								},
+							},
+						},
+					},
+					{
+						Name: taskNameRouterHeaderName,
+						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+							StringMatch: &matcherv3.StringMatcher{
+								MatchPattern: &matcherv3.StringMatcher_Exact{
+									Exact: task.taskName,
+								},
+							},
+						},
+					},
+					{
+						Name: serviceRouteHeaderName,
+						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+							StringMatch: &matcherv3.StringMatcher{
+								MatchPattern: &matcherv3.StringMatcher_Exact{
+									Exact: task.service,
+								},
+							},
+						},
+					},
+				},
+			},
+			Action: action,
+		})
+		if task.operationAlias != "" {
+			defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+				Match: &routev3.RouteMatch{
+					PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
+					Headers: []*routev3.HeaderMatcher{
+						{
+							Name: operationAliasRouterHeaderName,
+							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+								StringMatch: &matcherv3.StringMatcher{
+									MatchPattern: &matcherv3.StringMatcher_Exact{
+										Exact: task.operationAlias,
+									},
+								},
+							},
+						},
+						{
+							Name: taskNameRouterHeaderName,
+							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+								StringMatch: &matcherv3.StringMatcher{
+									MatchPattern: &matcherv3.StringMatcher_Exact{
+										Exact: task.taskName,
+									},
+								},
+							},
+						},
+						{
+							Name: serviceRouteHeaderName,
+							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+								StringMatch: &matcherv3.StringMatcher{
+									MatchPattern: &matcherv3.StringMatcher_Exact{
+										Exact: task.service,
+									},
+								},
+							},
+						},
+					},
+				},
+				Action: action,
+			})
+		}
 	}
 
 	defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
