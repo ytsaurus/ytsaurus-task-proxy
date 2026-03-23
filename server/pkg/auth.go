@@ -86,6 +86,14 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 	var hash string
 	if routerHeaderValue, ok := headers[idRouterHeaderName]; ok {
 		hash = routerHeaderValue
+	} else if operationID, ok := headers[operationIDRouterHeaderName]; ok {
+		hash = taskHash(operationID, headers[taskNameRouterHeaderName], headers[serviceRouteHeaderName])
+	} else if operationAlias, ok := headers[operationAliasRouterHeaderName]; ok {
+		operationID, ok := s.operationAliasToID[operationAlias]
+		if !ok {
+			return nil, fmt.Errorf("operation by alias %q from header was not found", operationAlias)
+		}
+		hash = taskHash(operationID, headers[taskNameRouterHeaderName], headers[serviceRouteHeaderName])
 	} else if host != "" {
 		subdomain := strings.Split(host, ".")[0]
 		if operationAlias, taskName, service, ok := tryParseAliasSubdomain(subdomain); ok {
@@ -93,7 +101,7 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 			if !ok {
 				return nil, fmt.Errorf("operation by alias %q from subdomain was not found", operationAlias)
 			}
-			hash = (&Task{operationID: operationID, taskName: taskName, service: service}).Hash()
+			hash = taskHash(operationID, taskName, service)
 		} else {
 			hash = subdomain
 		}
@@ -215,3 +223,7 @@ var (
 		},
 	}
 )
+
+func taskHash(operationID, taskName, service string) string {
+	return (&Task{operationID: operationID, taskName: taskName, service: service}).Hash()
+}

@@ -86,7 +86,93 @@ func TestFindTaskByRequest(t *testing.T) {
 			expectedID: task1.operationID,
 		},
 
-		// Source 2: Alias-based subdomain (format: alias-taskname-service)
+		// Source 2: (operation-id, task-name, service) headers
+		{
+			name: "operation-id headers - valid task",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-id": task1.operationID,
+				"x-yt-taskproxy-task-name":    task1.taskName,
+				"x-yt-taskproxy-service":      task1.service,
+			},
+			expectedID: task1.operationID,
+		},
+		{
+			name: "operation-id headers - unknown task",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-id": "op-unknown",
+				"x-yt-taskproxy-task-name":    "worker",
+				"x-yt-taskproxy-service":      "api",
+			},
+			errorMsg: "no entry for hash",
+		},
+		{
+			name: "operation-id headers - takes precedence over host",
+			host: task3Hash + ".example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-id": task1.operationID,
+				"x-yt-taskproxy-task-name":    task1.taskName,
+				"x-yt-taskproxy-service":      task1.service,
+			},
+			expectedID: task1.operationID,
+		},
+		{
+			name: "operation-id headers - id header takes precedence over operation-id headers",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-id":           task1Hash,
+				"x-yt-taskproxy-operation-id": task3.operationID,
+				"x-yt-taskproxy-task-name":    task3.taskName,
+				"x-yt-taskproxy-service":      task3.service,
+			},
+			expectedID: task1.operationID,
+		},
+
+		// Source 3: (operation-alias, task-name, service) headers
+		{
+			name: "operation-alias headers - valid alias",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-alias": task2.operationAlias,
+				"x-yt-taskproxy-task-name":       task2.taskName,
+				"x-yt-taskproxy-service":         task2.service,
+			},
+			expectedID: task2.operationID,
+		},
+		{
+			name: "operation-alias headers - unknown alias",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-alias": "unknownalias",
+				"x-yt-taskproxy-task-name":       "worker",
+				"x-yt-taskproxy-service":         "api",
+			},
+			errorMsg: "operation by alias \"unknownalias\" from header was not found",
+		},
+		{
+			name: "operation-alias headers - takes precedence over host",
+			host: task3Hash + ".example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-alias": task2.operationAlias,
+				"x-yt-taskproxy-task-name":       task2.taskName,
+				"x-yt-taskproxy-service":         task2.service,
+			},
+			expectedID: task2.operationID,
+		},
+		{
+			name: "operation-alias headers - operation-id headers take precedence",
+			host: "ignored.example.com",
+			headers: map[string]string{
+				"x-yt-taskproxy-operation-id":    task1.operationID,
+				"x-yt-taskproxy-operation-alias": task2.operationAlias,
+				"x-yt-taskproxy-task-name":       task1.taskName,
+				"x-yt-taskproxy-service":         task1.service,
+			},
+			expectedID: task1.operationID,
+		},
+
+		// Source 4: Alias-based subdomain (format: alias-taskname-service)
 		{
 			name: "alias subdomain - valid alias",
 			host: "myalias-master-ui.example.com",
@@ -111,7 +197,7 @@ func TestFindTaskByRequest(t *testing.T) {
 			expectedID: task2.operationID,
 		},
 
-		// Source 3: Direct hash from subdomain (fallback)
+		// Source 5: Direct hash from subdomain (fallback)
 		{
 			name:       "direct hash subdomain - valid hash",
 			host:       task1Hash + ".example.com",
