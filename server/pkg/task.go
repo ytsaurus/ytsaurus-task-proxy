@@ -28,7 +28,7 @@ type Task struct {
 	jobs           []HostPort
 }
 
-var valueRegexp = regexp.MustCompile(`^[a-z0-9]{1,30}$`)
+var valueRegexp = regexp.MustCompile(`^[a-z0-9_]{1,30}$`)
 
 // Identifies task, for sorting and domain hash
 func (t *Task) ID() string {
