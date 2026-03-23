@@ -109,56 +109,18 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 			Match: &routev3.RouteMatch{
 				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
-				Headers: []*routev3.HeaderMatcher{
-					{
-						Name: idRouterHeaderName,
-						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-							StringMatch: &matcherv3.StringMatcher{
-								MatchPattern: &matcherv3.StringMatcher_Exact{
-									Exact: hash,
-								},
-							},
-						},
-					},
-				},
+				Headers:       makeHeaderMatchers(map[string]string{idRouterHeaderName: hash}),
 			},
 			Action: action,
 		})
 		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 			Match: &routev3.RouteMatch{
 				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
-				Headers: []*routev3.HeaderMatcher{
-					{
-						Name: operationIDRouterHeaderName,
-						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-							StringMatch: &matcherv3.StringMatcher{
-								MatchPattern: &matcherv3.StringMatcher_Exact{
-									Exact: task.operationID,
-								},
-							},
-						},
-					},
-					{
-						Name: taskNameRouterHeaderName,
-						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-							StringMatch: &matcherv3.StringMatcher{
-								MatchPattern: &matcherv3.StringMatcher_Exact{
-									Exact: task.taskName,
-								},
-							},
-						},
-					},
-					{
-						Name: serviceRouteHeaderName,
-						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-							StringMatch: &matcherv3.StringMatcher{
-								MatchPattern: &matcherv3.StringMatcher_Exact{
-									Exact: task.service,
-								},
-							},
-						},
-					},
-				},
+				Headers: makeHeaderMatchers(map[string]string{
+					operationIDRouterHeaderName: task.operationID,
+					taskNameRouterHeaderName:    task.taskName,
+					serviceRouteHeaderName:      task.service,
+				}),
 			},
 			Action: action,
 		})
@@ -166,38 +128,11 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 			defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 				Match: &routev3.RouteMatch{
 					PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
-					Headers: []*routev3.HeaderMatcher{
-						{
-							Name: operationAliasRouterHeaderName,
-							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-								StringMatch: &matcherv3.StringMatcher{
-									MatchPattern: &matcherv3.StringMatcher_Exact{
-										Exact: task.operationAlias,
-									},
-								},
-							},
-						},
-						{
-							Name: taskNameRouterHeaderName,
-							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-								StringMatch: &matcherv3.StringMatcher{
-									MatchPattern: &matcherv3.StringMatcher_Exact{
-										Exact: task.taskName,
-									},
-								},
-							},
-						},
-						{
-							Name: serviceRouteHeaderName,
-							HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-								StringMatch: &matcherv3.StringMatcher{
-									MatchPattern: &matcherv3.StringMatcher_Exact{
-										Exact: task.service,
-									},
-								},
-							},
-						},
-					},
+					Headers: makeHeaderMatchers(map[string]string{
+						operationAliasRouterHeaderName: task.operationAlias,
+						taskNameRouterHeaderName:       task.taskName,
+						serviceRouteHeaderName:         task.service,
+					}),
 				},
 				Action: action,
 			})
@@ -403,4 +338,21 @@ func mustAny(m proto.Message) *anypb.Any {
 		panic(err)
 	}
 	return a
+}
+
+func makeHeaderMatchers(headers map[string]string) []*routev3.HeaderMatcher {
+	matchers := make([]*routev3.HeaderMatcher, 0, len(headers))
+	for name, value := range headers {
+		matchers = append(matchers, &routev3.HeaderMatcher{
+			Name: name,
+			HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+				StringMatch: &matcherv3.StringMatcher{
+					MatchPattern: &matcherv3.StringMatcher_Exact{
+						Exact: value,
+					},
+				},
+			},
+		})
+	}
+	return matchers
 }
