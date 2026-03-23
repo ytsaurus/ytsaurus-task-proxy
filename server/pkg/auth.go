@@ -84,8 +84,16 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 	defer s.mx.RUnlock()
 
 	var hash string
-	if routerHeaderValue, ok := headers[routerHeaderName]; ok {
+	if routerHeaderValue, ok := headers[idRouterHeaderName]; ok {
 		hash = routerHeaderValue
+	} else if operationID, ok := headers[operationIDRouterHeaderName]; ok {
+		hash = taskHash(operationID, headers[taskNameRouterHeaderName], headers[serviceRouteHeaderName])
+	} else if operationAlias, ok := headers[operationAliasRouterHeaderName]; ok {
+		operationID, ok := s.operationAliasToID[operationAlias]
+		if !ok {
+			return nil, fmt.Errorf("operation by alias %q from header was not found", operationAlias)
+		}
+		hash = taskHash(operationID, headers[taskNameRouterHeaderName], headers[serviceRouteHeaderName])
 	} else if host != "" {
 		subdomain := strings.Split(host, ".")[0]
 		if operationAlias, taskName, service, ok := tryParseAliasSubdomain(subdomain); ok {
@@ -93,12 +101,12 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 			if !ok {
 				return nil, fmt.Errorf("operation by alias %q from subdomain was not found", operationAlias)
 			}
-			hash = (&Task{operationID: operationID, taskName: taskName, service: service}).Hash()
+			hash = taskHash(operationID, taskName, service)
 		} else {
 			hash = subdomain
 		}
 	} else {
-		return nil, fmt.Errorf("authority (host) or %s headers are missing in request", routerHeaderName)
+		return nil, fmt.Errorf("authority (host) or %s headers are missing in request", idRouterHeaderName)
 	}
 
 	if task, ok := s.hashToTasks[hash]; !ok {
@@ -215,3 +223,7 @@ var (
 		},
 	}
 )
+
+func taskHash(operationID, taskName, service string) string {
+	return (&Task{operationID: operationID, taskName: taskName, service: service}).Hash()
+}

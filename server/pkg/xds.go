@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sort"
 	"time"
 
 	"google.golang.org/grpc"
@@ -37,7 +38,13 @@ import (
 
 const (
 	extAuthClusterName = "extAuthz"
-	routerHeaderName   = "x-yt-taskproxy-id"
+
+	idRouterHeaderName = "x-yt-taskproxy-id" // hash
+
+	operationIDRouterHeaderName    = "x-yt-taskproxy-operation-id"
+	operationAliasRouterHeaderName = "x-yt-taskproxy-operation-alias"
+	taskNameRouterHeaderName       = "x-yt-taskproxy-task-name"
+	serviceRouteHeaderName         = "x-yt-taskproxy-service"
 )
 
 func ServeGRPC(s serverv3.Server, authServer *authServer) error {
@@ -99,25 +106,38 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				Action: action,
 			}},
 		})
-		// ... or by custom header
+		// ... or by custom header(-s)
 		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 			Match: &routev3.RouteMatch{
 				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
-				Headers: []*routev3.HeaderMatcher{
-					{
-						Name: routerHeaderName,
-						HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
-							StringMatch: &matcherv3.StringMatcher{
-								MatchPattern: &matcherv3.StringMatcher_Exact{
-									Exact: hash,
-								},
-							},
-						},
-					},
-				},
+				Headers:       makeHeaderMatchers(map[string]string{idRouterHeaderName: hash}),
 			},
 			Action: action,
 		})
+		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+			Match: &routev3.RouteMatch{
+				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
+				Headers: makeHeaderMatchers(map[string]string{
+					operationIDRouterHeaderName: task.operationID,
+					taskNameRouterHeaderName:    task.taskName,
+					serviceRouteHeaderName:      task.service,
+				}),
+			},
+			Action: action,
+		})
+		if task.operationAlias != "" {
+			defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
+				Match: &routev3.RouteMatch{
+					PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"},
+					Headers: makeHeaderMatchers(map[string]string{
+						operationAliasRouterHeaderName: task.operationAlias,
+						taskNameRouterHeaderName:       task.taskName,
+						serviceRouteHeaderName:         task.service,
+					}),
+				},
+				Action: action,
+			})
+		}
 	}
 
 	defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
@@ -319,4 +339,29 @@ func mustAny(m proto.Message) *anypb.Any {
 		panic(err)
 	}
 	return a
+}
+
+func makeHeaderMatchers(headers map[string]string) []*routev3.HeaderMatcher {
+	// Sort keys for deterministic order
+	keys := make([]string, 0, len(headers))
+	for name := range headers {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+
+	matchers := make([]*routev3.HeaderMatcher, 0, len(headers))
+	for _, name := range keys {
+		value := headers[name]
+		matchers = append(matchers, &routev3.HeaderMatcher{
+			Name: name,
+			HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
+				StringMatch: &matcherv3.StringMatcher{
+					MatchPattern: &matcherv3.StringMatcher_Exact{
+						Exact: value,
+					},
+				},
+			},
+		})
+	}
+	return matchers
 }
