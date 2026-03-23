@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sort"
 	"time"
 
 	"google.golang.org/grpc"
@@ -341,8 +342,16 @@ func mustAny(m proto.Message) *anypb.Any {
 }
 
 func makeHeaderMatchers(headers map[string]string) []*routev3.HeaderMatcher {
+	// Sort keys for deterministic order
+	keys := make([]string, 0, len(headers))
+	for name := range headers {
+		keys = append(keys, name)
+	}
+	sort.Strings(keys)
+
 	matchers := make([]*routev3.HeaderMatcher, 0, len(headers))
-	for name, value := range headers {
+	for _, name := range keys {
+		value := headers[name]
 		matchers = append(matchers, &routev3.HeaderMatcher{
 			Name: name,
 			HeaderMatchSpecifier: &routev3.HeaderMatcher_StringMatch{
