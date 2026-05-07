@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    yt_component: task-proxy
 spec:
   type:
   {{- if .Values.tls.enabled }}
@@ -21,3 +23,9 @@ spec:
     {{- else }}
       80
     {{- end }}
+  {{- if .Values.monitoring.enabled }}
+  - name: metrics
+    port: 9901
+    targetPort: 9901
+  {{- end }}
+

@@ -17,13 +17,13 @@ tls:
   certSecretRef: yt-domain-cert
 
 proxy:
-  image: 
+  image:
     repository: envoyproxy/envoy
     tag: v1.36-latest
   resources: {}
 
 server:
-  image: 
+  image:
     repository: ghcr.io/ytsaurus/task-proxy
     tag: ""
   resources: {}
@@ -31,3 +31,8 @@ server:
 nodeSelector: {}
 
 affinity: {}
+
+# prometheus/victoriametrics monitoring
+monitoring:
+  enabled: false
+  engine: prometheus # or victoriametrics
