@@ -64,6 +64,7 @@ func main() {
 	ytProxy := fmt.Sprintf("http-proxies-lb.%s.svc.cluster.local", args.namespace)
 	ytClient, err := pkg.CreateYTClient(ytProxy, &ytsdk.TokenCredentials{Token: ytToken})
 	if err != nil {
+		pkg.DefaultMetrics().ObserveYTError("create_client", err)
 		log.Fatalf("failed to create YT client: %v", err)
 	}
 
@@ -80,9 +81,15 @@ func main() {
 
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
 
-	authServer := pkg.CreateAuthServer(ytClient, ytProxy, &logger, args.authCookieName)
+	authServer := pkg.CreateAuthServer(ytClient, &logger, args.authCookieName)
 
 	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, authServer, taskDiscovery, cache)
+
+	go func() {
+		if err := pkg.ServeMetrics(pkg.DefaultGatherer()); err != nil {
+			log.Fatalf("failed to serve metrics: %v", err)
+		}
+	}()
 
 	go func() {
 		var version string

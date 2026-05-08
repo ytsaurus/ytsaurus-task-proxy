@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: envoy
-        image: {{ .Values.proxy.image.repository }}:{{ .Values.proxy.image.tag }}
+        image: {{ .Values.proxy.image.repository }}{{ if .Values.proxy.image.tag }}:{{ .Values.proxy.image.tag }}{{ end }}
         args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "edge-proxy"]
         ports:
         - name: http
@@ -46,7 +46,7 @@ spec:
           {{ toYaml . | nindent 10 }}
         {{- end }}
       - name: server
-        image: {{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}
+        image: {{ .Values.server.image.repository }}{{ if .Values.server.image.tag }}:{{ .Values.server.image.tag }}{{ end }}
         command: ["./server"]
         args:
         - "-yt-token-path=/etc/yt/token" 
@@ -58,7 +58,9 @@ spec:
         - "-auth-cookie-name={{ .Values.auth.cookieName }}"
         ports:
         - containerPort: 9090
-          name: http
+          name: grpc
+        - containerPort: 9102
+          name: metrics
         volumeMounts:
         - name: token
           mountPath: /etc/yt

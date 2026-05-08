@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.ytsaurus.tech/yt/go/ypath"
 	"go.ytsaurus.tech/yt/go/yson"
@@ -160,8 +161,11 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 		},
 	} {
 		var nodes []string
+		listNodeStarted := time.Now()
 		err := d.yt.ListNode(ctx, ypath.Path(discoveryPath).Child("discovery").Child(t.dir), &nodes, nil)
+		defaultMetrics.ObserveYTDuration("list_node", time.Since(listNodeStarted))
 		if err != nil {
+			defaultMetrics.ObserveYTError("list_node", err)
 			if t.taskName == "history" {
 				// history server is optionally enabled in spark conf
 				continue
@@ -197,10 +201,13 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 		return nil, fmt.Errorf("invalid task_proxy annotation: %v", taskProxyAnnotation)
 	}
 
+	listJobsStarted := time.Now()
 	listJobs, err := d.yt.ListJobs(ctx, op.ID, &ytsdk.ListJobsOptions{
 		JobState: &ytsdk.JobRunning,
 	})
+	defaultMetrics.ObserveYTDuration("list_jobs", time.Since(listJobsStarted))
 	if err != nil {
+		defaultMetrics.ObserveYTError("list_jobs", err)
 		return nil, fmt.Errorf("failed to list jobs: %v", err)
 	}
 
@@ -208,6 +215,7 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 
 	for _, job := range listJobs.Jobs {
 		var jobPorts []int
+		getNodeStarted := time.Now()
 		err = d.yt.GetNode(
 			ctx,
 			ypath.Path(
@@ -220,7 +228,9 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 			&jobPorts,
 			nil,
 		)
+		defaultMetrics.ObserveYTDuration("get_node", time.Since(getNodeStarted))
 		if err != nil {
+			defaultMetrics.ObserveYTError("get_node", err)
 			return nil, fmt.Errorf("failed to list job %q ports: %v", job.ID, err)
 		}
 		for i, port := range jobPorts {
@@ -270,21 +280,31 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 }
 
 func (d *taskDiscovery) save(ctx context.Context, hashToTask map[string]Task) error {
+	nodeExistsStarted := time.Now()
 	exists, err := d.yt.NodeExists(ctx, d.tablePath, nil)
+	defaultMetrics.ObserveYTDuration("node_exists", time.Since(nodeExistsStarted))
 	if err != nil {
+		defaultMetrics.ObserveYTError("node_exists", err)
 		return err
 	}
 	if !exists {
+		createNodeStarted := time.Now()
 		_, err := d.yt.CreateNode(ctx, d.tablePath, ytsdk.NodeTable, nil)
+		defaultMetrics.ObserveYTDuration("create_node", time.Since(createNodeStarted))
 		if err != nil {
+			defaultMetrics.ObserveYTError("create_node", err)
 			return err
 		}
 	}
+	writeTableStarted := time.Now()
 	w, err := d.yt.WriteTable(ctx, d.tablePath, nil)
+	defaultMetrics.ObserveYTDuration("write_table", time.Since(writeTableStarted))
 	if err != nil {
+		defaultMetrics.ObserveYTError("write_table", err)
 		return err
 	}
 	for hash, task := range hashToTask {
+		writeTableRowStarted := time.Now()
 		err = w.Write(&TaskRow{
 			OperationID: task.operationID,
 			TaskName:    task.taskName,
@@ -292,11 +312,20 @@ func (d *taskDiscovery) save(ctx context.Context, hashToTask map[string]Task) er
 			Protocol:    string(task.protocol),
 			Domain:      getTaskHashDomain(hash, d.baseDomain),
 		})
+		defaultMetrics.ObserveYTDuration("write_table_row", time.Since(writeTableRowStarted))
 		if err != nil {
+			defaultMetrics.ObserveYTError("write_table_row", err)
 			return err
 		}
 	}
-	return w.Commit()
+	writeTableCommitStarted := time.Now()
+	if err := w.Commit(); err != nil {
+		defaultMetrics.ObserveYTDuration("write_table_commit", time.Since(writeTableCommitStarted))
+		defaultMetrics.ObserveYTError("write_table_commit", err)
+		return err
+	}
+	defaultMetrics.ObserveYTDuration("write_table_commit", time.Since(writeTableCommitStarted))
+	return nil
 }
 
 func (d *taskDiscovery) listOperations(ctx context.Context) ([]ytsdk.OperationStatus, error) {
@@ -312,6 +341,7 @@ func (d *taskDiscovery) listOperations(ctx context.Context) ([]ytsdk.OperationSt
 			cursor,
 			len(operations),
 		)
+		listOperationsStarted := time.Now()
 		resp, err := d.yt.ListOperations(ctx, &ytsdk.ListOperationsOptions{
 			State:           &ytsdk.StateRunning,
 			Cursor:          cursor,
@@ -319,7 +349,9 @@ func (d *taskDiscovery) listOperations(ctx context.Context) ([]ytsdk.OperationSt
 			Limit:           &limit,
 			Attributes:      []string{"id", "runtime_parameters", "brief_spec"},
 		})
+		defaultMetrics.ObserveYTDuration("list_operations", time.Since(listOperationsStarted))
 		if err != nil {
+			defaultMetrics.ObserveYTError("list_operations", err)
 			return nil, err
 		}
 		operations = append(operations, resp.Operations...)

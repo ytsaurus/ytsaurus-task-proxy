@@ -25,6 +25,9 @@ spec:
       yt_component: task-proxy
   endpoints:
     - port: metrics
+      path: /metrics/prometheus
+      interval: 30s
+    - port: envoy-metrics
       path: /stats/prometheus
       interval: 30s
 

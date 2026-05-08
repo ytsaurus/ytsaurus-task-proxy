@@ -36,3 +36,9 @@ affinity: {}
 monitoring:
   enabled: false
   engine: prometheus # or victoriametrics
+  alerts:
+    enabled: true
+    infrastructureAuthFailuresPerMinuteThreshold: 10
+    contextDeadlineExceededPerMinuteThreshold: 10
+    grpcUnavailablePerMinuteThreshold: 10
+    connectionTimeoutPerMinuteThreshold: 10
