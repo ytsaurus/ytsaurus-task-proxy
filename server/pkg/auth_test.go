@@ -42,7 +42,7 @@ func TestFindTaskByRequest(t *testing.T) {
 		"anotheralias": "op-999",
 	}
 
-	server := CreateAuthServer(nil, "", &SimpleLogger{}, "")
+	server := CreateAuthServer(nil, "", &SimpleLogger{}, "", AuthCacheConfig{})
 	server.SetTasksData(hashToTasks, operationAliasToID)
 
 	tests := []struct {

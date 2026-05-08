@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
+
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -15,6 +18,33 @@ import (
 	"google.golang.org/genproto/googleapis/rpc/status"
 	"google.golang.org/grpc/codes"
 )
+
+type AuthCacheConfig struct {
+	Enabled    bool
+	TTLSeconds int
+	Capacity   int
+}
+
+type authCacheKey struct {
+	credentials string
+	operationID string
+}
+
+func credentialsKey(creds ytsdk.Credentials) string {
+	if creds == nil {
+		return ""
+	}
+	switch v := creds.(type) {
+	case *ytsdk.TokenCredentials:
+		return "token:" + v.Token
+	case *ytsdk.BearerCredentials:
+		return "bearer:" + v.Token
+	case *ytsdk.CookieCredentials:
+		return "cookie:" + v.Cookie.Value
+	default:
+		return fmt.Sprintf("%T:%v", v, v)
+	}
+}
 
 type authServer struct {
 	authv3.UnimplementedAuthorizationServer
@@ -26,9 +56,15 @@ type authServer struct {
 	ytProxy            string
 	logger             *SimpleLogger
 	authCookieName     string
+	cache              *lru.LRU[authCacheKey, bool] // cache is nil when caching is disabled.
 }
 
-func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string) *authServer {
+func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string, cacheCfg AuthCacheConfig) *authServer {
+	var cache *lru.LRU[authCacheKey, bool]
+	if cacheCfg.Enabled {
+		ttl := time.Duration(cacheCfg.TTLSeconds) * time.Second
+		cache = lru.NewLRU[authCacheKey, bool](cacheCfg.Capacity, nil, ttl)
+	}
 	return &authServer{
 		hashToTasks:    make(map[string]Task),
 		mx:             sync.RWMutex{},
@@ -36,6 +72,7 @@ func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, aut
 		ytProxy:        ytProxy,
 		logger:         logger,
 		authCookieName: authCookieName,
+		cache:          cache,
 	}
 }
 
@@ -122,6 +159,17 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		return false, nil
 	}
 
+	cacheKey := authCacheKey{
+		credentials: credentialsKey(userCredentials),
+		operationID: operationID,
+	}
+	if s.cache != nil {
+		if allowed, ok := s.cache.Get(cacheKey); ok {
+			s.logger.Debugf("cache hit for operation %q: allowed=%v", operationID, allowed)
+			return allowed, nil
+		}
+	}
+
 	userYT, err := CreateYTClient(s.ytProxy, userCredentials)
 	if err != nil {
 		return false, err
@@ -156,8 +204,14 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		return false, err
 	}
 
+	allowed := resp.Action == "allow"
 	s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-	return resp.Action == "allow", nil
+
+	if s.cache != nil {
+		s.cache.Add(cacheKey, allowed)
+	}
+
+	return allowed, nil
 }
 
 func (s *authServer) getYTCredentialsFromHeaders(headers map[string]string) ytsdk.Credentials {

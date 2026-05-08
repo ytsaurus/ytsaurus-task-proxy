@@ -29,6 +29,9 @@ func main() {
 		discoveryPeriodSeconds uint
 		authEnabled            bool
 		authCookieName         string
+		authCacheEnabled       bool
+		authCacheTTLSeconds    int
+		authCacheCapacity      int
 	}
 	flag.StringVar(&args.namespace, "namespace", "", "k8s namespace")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
@@ -37,6 +40,9 @@ func main() {
 	flag.UintVar(&args.discoveryPeriodSeconds, "discovery-period-seconds", 60, "services discovery period in seconds")
 	flag.BoolVar(&args.authEnabled, "auth-enabled", true, "operation auth enabled")
 	flag.StringVar(&args.authCookieName, "auth-cookie-name", "", "auth cookie name")
+	flag.BoolVar(&args.authCacheEnabled, "auth-cache-enabled", false, "enable auth cache")
+	flag.IntVar(&args.authCacheTTLSeconds, "auth-cache-ttl-seconds", 0, "auth cache entry TTL in seconds (0 means no expiration)")
+	flag.IntVar(&args.authCacheCapacity, "auth-cache-capacity", 0, "auth cache maximum number of entries (0 means unlimited)")
 	flag.Parse()
 
 	if args.namespace == "" {
@@ -80,7 +86,11 @@ func main() {
 
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
 
-	authServer := pkg.CreateAuthServer(ytClient, ytProxy, &logger, args.authCookieName)
+	authServer := pkg.CreateAuthServer(ytClient, ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
+		Enabled:    args.authCacheEnabled,
+		TTLSeconds: args.authCacheTTLSeconds,
+		Capacity:   args.authCacheCapacity,
+	})
 
 	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, authServer, taskDiscovery, cache)
 

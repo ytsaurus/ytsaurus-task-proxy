@@ -11,6 +11,10 @@ discoveryPeriodSeconds: 60
 auth:
   enabled: true
   cookieName: YTCypressCookie
+  cache:
+    enabled: false
+    ttlSeconds: 0
+    capacity: 0
 
 tls:
   enabled: false

@@ -56,6 +56,9 @@ spec:
         - "-discovery-period-seconds={{ .Values.discoveryPeriodSeconds }}"
         - "-auth-enabled={{ .Values.auth.enabled }}"
         - "-auth-cookie-name={{ .Values.auth.cookieName }}"
+        - "-auth-cache-enabled={{ .Values.auth.cache.enabled }}"
+        - "-auth-cache-ttl-seconds={{ .Values.auth.cache.ttlSeconds }}"
+        - "-auth-cache-capacity={{ .Values.auth.cache.capacity }}"
         ports:
         - containerPort: 9090
           name: http
