@@ -52,42 +52,42 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	m := &Metrics{
 		authSuccesses: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "auth_success_total",
+				Name: "yt_task_proxy_auth_success_total",
 				Help: "Successful authorization outcomes grouped by reason.",
 			},
 			[]string{"reason"},
 		),
 		authFailures: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "auth_failed_total",
+				Name: "yt_task_proxy_auth_failed_total",
 				Help: "Failed authorization outcomes grouped by reason.",
 			},
 			[]string{"reason"},
 		),
 		authErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "auth_errors_total",
+				Name: "yt_task_proxy_auth_errors_total",
 				Help: "Authorization-related errors grouped by stage.",
 			},
 			[]string{"stage"},
 		),
 		authInfrastructureErrors: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "auth_infra_errors_total",
+				Name: "yt_task_proxy_auth_infra_errors_total",
 				Help: "Infrastructure failures during authorization, grouped by stage and error class.",
 			},
 			[]string{"stage", "kind", "grpc_code"},
 		),
 		ytRequestError: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "ytsaurus_request_errors_total",
+				Name: "yt_task_proxy_ytsaurus_request_errors_total",
 				Help: "YTsaurus request errors grouped by request kind and error class.",
 			},
 			[]string{"request", "kind", "grpc_code"},
 		),
 		ytRequestDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "ytsaurus_request_duration_seconds",
+				Name:    "yt_task_proxy_ytsaurus_request_duration_seconds",
 				Help:    "YTsaurus request duration grouped by request kind.",
 				Buckets: []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5},
 			},
