@@ -21,28 +21,28 @@ spec:
     - name: task-proxy
       rules:
         - alert: TaskProxyAuthorizationInfrastructureFailures
-          expr: sum(increase(auth_infra_errors_total[1m])) > {{ .Values.monitoring.alerts.infrastructureAuthFailuresPerMinuteThreshold }}
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total[1m])) > {{ .Values.monitoring.alerts.infrastructureAuthFailuresPerMinuteThreshold }}
           labels:
             severity: warning
           annotations:
             summary: Task proxy authorization infrastructure failures exceed threshold
             description: Task proxy observed more than {{ .Values.monitoring.alerts.infrastructureAuthFailuresPerMinuteThreshold }} authorization infrastructure failures over the last minute.
         - alert: TaskProxyAuthorizationContextDeadlineExceeded
-          expr: sum(increase(auth_infra_errors_total{kind="context_deadline_exceeded"}[1m])) > {{ .Values.monitoring.alerts.contextDeadlineExceededPerMinuteThreshold }}
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="context_deadline_exceeded"}[1m])) > {{ .Values.monitoring.alerts.contextDeadlineExceededPerMinuteThreshold }}
           labels:
             severity: warning
           annotations:
             summary: Task proxy authorization context deadline exceeded rate exceeds threshold
             description: Task proxy observed more than {{ .Values.monitoring.alerts.contextDeadlineExceededPerMinuteThreshold }} context deadline exceeded authorization failures over the last minute.
         - alert: TaskProxyAuthorizationGrpcUnavailable
-          expr: sum(increase(auth_infra_errors_total{kind="grpc_unavailable"}[1m])) > {{ .Values.monitoring.alerts.grpcUnavailablePerMinuteThreshold }}
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="grpc_unavailable"}[1m])) > {{ .Values.monitoring.alerts.grpcUnavailablePerMinuteThreshold }}
           labels:
             severity: warning
           annotations:
             summary: Task proxy authorization gRPC unavailable rate exceeds threshold
             description: Task proxy observed more than {{ .Values.monitoring.alerts.grpcUnavailablePerMinuteThreshold }} gRPC unavailable authorization failures over the last minute.
         - alert: TaskProxyAuthorizationConnectionTimeout
-          expr: sum(increase(auth_infra_errors_total{kind="connection_timeout"}[1m])) > {{ .Values.monitoring.alerts.connectionTimeoutPerMinuteThreshold }}
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="connection_timeout"}[1m])) > {{ .Values.monitoring.alerts.connectionTimeoutPerMinuteThreshold }}
           labels:
             severity: warning
           annotations:
