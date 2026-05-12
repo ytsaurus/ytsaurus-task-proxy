@@ -120,6 +120,7 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
+		s.logger.Warnf("request without credentials, headers: %v", headers)
 		defaultMetrics.ObserveAuthFailure(authReasonCredentials, nil)
 		return false, nil
 	}
@@ -128,13 +129,14 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	userResp, err := s.yt.WhoAmI(ytsdk.WithCredentials(ctx, userCredentials), nil)
 	defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
 	if err != nil {
+		s.logger.Errorf("whoami failed: %v", err)
 		defaultMetrics.ObserveAuthYTError("whoami", err)
 		return false, err
 	}
 
 	user := userResp.Login
 	if user == "" {
-		s.logger.Warnf("user not identified by provided credentials")
+		s.logger.Errorf("user not identified by provided credentials: %v", userResp)
 		defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
 		return false, nil
 	}
@@ -157,6 +159,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	)
 	defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 	if err != nil {
+		s.logger.Infof("permission check failed: %v", err)
 		defaultMetrics.ObserveAuthYTError("permission_check", err)
 		return false, err
 	}
