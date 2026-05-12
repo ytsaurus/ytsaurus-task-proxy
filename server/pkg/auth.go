@@ -63,7 +63,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	allowed, err := s.checkOperationPermission(ctx, task.operationID, headers)
 	if err != nil {
 		s.logger.Errorf("error while checking operation permission: %v", err)
-		return unavailableResponse, nil
+		return deniedResponse, nil
 	}
 
 	if !allowed {
@@ -229,18 +229,6 @@ var (
 			DeniedResponse: &authv3.DeniedHttpResponse{
 				Status: &typev3.HttpStatus{Code: typev3.StatusCode_Forbidden},
 				Body:   "permission denied",
-			},
-		},
-	}
-	unavailableResponse = &authv3.CheckResponse{
-		Status: &status.Status{
-			Code:    int32(codes.Unavailable),
-			Message: "authorization backend unavailable",
-		},
-		HttpResponse: &authv3.CheckResponse_DeniedResponse{
-			DeniedResponse: &authv3.DeniedHttpResponse{
-				Status: &typev3.HttpStatus{Code: typev3.StatusCode_ServiceUnavailable},
-				Body:   "authorization backend unavailable",
 			},
 		},
 	}

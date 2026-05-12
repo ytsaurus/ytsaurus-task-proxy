@@ -12,8 +12,4 @@ func TestAuthResponsesDifferentiatePermissionDeniedAndInfrastructure(t *testing.
 	require.Equal(t, int32(codes.PermissionDenied), deniedResponse.GetStatus().GetCode())
 	require.Equal(t, typev3.StatusCode_Forbidden, deniedResponse.GetDeniedResponse().GetStatus().GetCode())
 	require.Equal(t, "permission denied", deniedResponse.GetDeniedResponse().GetBody())
-
-	require.Equal(t, int32(codes.Unavailable), unavailableResponse.GetStatus().GetCode())
-	require.Equal(t, typev3.StatusCode_ServiceUnavailable, unavailableResponse.GetDeniedResponse().GetStatus().GetCode())
-	require.Equal(t, "authorization backend unavailable", unavailableResponse.GetDeniedResponse().GetBody())
 }

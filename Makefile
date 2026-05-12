@@ -25,7 +25,7 @@ build:
 	@echo "⚙️  Building binary for $(BUILD_PLATFORM)..."
 	cd server && \
 	    GOOS=$(TARGET_OS) GOARCH=$(TARGET_ARCH) \
-	    go build -o ../dist/task-proxy .
+	    go build -o server .
 	@echo "✅ Binary built: dist/task-proxy"
 
 .PHONY: image
@@ -58,7 +58,7 @@ release: helm-chart
 .PHONY: clean
 clean:
 	@echo "🗑️  Cleaning up artifacts..."
-	rm -rf dist/ $(CHART_PACKAGE)
+	rm -f server/server $(CHART_PACKAGE)
 	@echo "✅ Cleanup completed"
 
 .DEFAULT_GOAL := helm-chart
