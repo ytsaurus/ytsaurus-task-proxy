@@ -50,7 +50,7 @@ spec:
         command: ["./server"]
         args:
         - "-yt-token-path=/etc/yt/token" 
-        - "-namespace={{ .Release.Namespace }}"
+        - "-yt-proxy={{ default (printf "http-proxies.%s.svc.cluster.local" .Release.Namespace) .Values.ytProxy }}"
         - "-base-domain={{ .Values.baseDomain }}"
         - "-dir-path={{ .Values.dirPath }}"
         - "-discovery-period-seconds={{ .Values.discoveryPeriodSeconds }}"

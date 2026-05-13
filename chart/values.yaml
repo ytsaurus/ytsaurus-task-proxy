@@ -4,6 +4,10 @@ baseDomain: my-cluster.ytsaurus.example.net
 
 tokenSecretRef: task-proxy-token
 
+# YTsaurus HTTP proxy host. If empty, chart will use
+# http-proxies.<release-namespace>.svc.cluster.local
+ytProxy: ""
+
 dirPath: //sys/task_proxies
 
 discoveryPeriodSeconds: 60
@@ -38,7 +42,11 @@ monitoring:
   engine: prometheus # or victoriametrics
   alerts:
     enabled: true
-    infrastructureAuthFailuresPerMinuteThreshold: 10
-    contextDeadlineExceededPerMinuteThreshold: 10
-    grpcUnavailablePerMinuteThreshold: 10
-    connectionTimeoutPerMinuteThreshold: 10
+    authInfrastructureFailuresPerMinuteThreshold: 10
+    authContextDeadlineExceededPerMinuteThreshold: 10
+    authGrpcUnavailablePerMinuteThreshold: 10
+    authConnectionTimeoutPerMinuteThreshold: 10
+    discoveryInfrastructureFailuresPerMinuteThreshold: 10
+    discoveryContextDeadlineExceededPerMinuteThreshold: 10
+    discoveryGrpcUnavailablePerMinuteThreshold: 10
+    discoveryConnectionTimeoutPerMinuteThreshold: 10

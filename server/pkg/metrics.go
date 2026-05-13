@@ -22,6 +22,10 @@ type Metrics struct {
 	authFailures             *prometheus.CounterVec
 	authErrors               *prometheus.CounterVec
 	authInfrastructureErrors *prometheus.CounterVec
+	discoverySuccesses       *prometheus.CounterVec
+	discoveryFailures        *prometheus.CounterVec
+	discoveryErrors          *prometheus.CounterVec
+	discoveryInfraErrors     *prometheus.CounterVec
 	ytRequestError           *prometheus.CounterVec
 	ytRequestDuration        *prometheus.HistogramVec
 }
@@ -35,6 +39,7 @@ const (
 	authReasonInvalidOperation  = "invalid_operation_id"
 	authReasonPermissionDenied  = "permission_denied"
 	authReasonInfrastructure    = "infra"
+	discoveryReasonInfra        = "infra"
 
 	grpcErrorContextDeadlineExceeded = "context_deadline_exceeded"
 	grpcErrorContextCanceled         = "context_canceled"
@@ -78,6 +83,34 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			},
 			[]string{"stage", "kind", "grpc_code"},
 		),
+		discoverySuccesses: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_discovery_success_total",
+				Help: "Successful discovery outcomes grouped by reason.",
+			},
+			[]string{"reason"},
+		),
+		discoveryFailures: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_discovery_failed_total",
+				Help: "Failed discovery outcomes grouped by reason.",
+			},
+			[]string{"reason"},
+		),
+		discoveryErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_discovery_errors_total",
+				Help: "Discovery-related errors grouped by stage.",
+			},
+			[]string{"stage"},
+		),
+		discoveryInfraErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_discovery_infra_errors_total",
+				Help: "Infrastructure failures during discovery, grouped by stage and error class.",
+			},
+			[]string{"stage", "kind", "grpc_code"},
+		),
 		ytRequestError: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "yt_task_proxy_ytsaurus_request_errors_total",
@@ -100,6 +133,10 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		m.authFailures,
 		m.authErrors,
 		m.authInfrastructureErrors,
+		m.discoverySuccesses,
+		m.discoveryFailures,
+		m.discoveryErrors,
+		m.discoveryInfraErrors,
 		m.ytRequestError,
 		m.ytRequestDuration,
 	)
@@ -140,6 +177,26 @@ func (m *Metrics) ObserveYTDuration(request string, duration time.Duration) {
 func (m *Metrics) ObserveAuthYTError(stage string, err error) string {
 	m.ObserveYTError(stage, err)
 	return m.ObserveAuthFailure(stage, err)
+}
+
+func (m *Metrics) ObserveDiscoverySuccess(reason string) {
+	m.discoverySuccesses.WithLabelValues(reason).Inc()
+}
+
+func (m *Metrics) ObserveDiscoveryFailure(stage string, err error) string {
+	m.discoveryErrors.WithLabelValues(stage).Inc()
+
+	if err == nil {
+		m.discoveryFailures.WithLabelValues(stage).Inc()
+		return stage
+	}
+
+	kind, grpcCode := classifyInfrastructureError(err)
+	m.discoveryInfraErrors.WithLabelValues(stage, kind, grpcCode).Inc()
+
+	failureReason := infrastructureDiscoveryReason(kind)
+	m.discoveryFailures.WithLabelValues(failureReason).Inc()
+	return failureReason
 }
 
 func NewMetricsHandler(gatherer prometheus.Gatherer) http.Handler {
@@ -218,6 +275,10 @@ func classifyInfrastructureError(err error) (string, string) {
 
 func infrastructureAuthReason(kind string) string {
 	return authReasonInfrastructure + "_" + kind
+}
+
+func infrastructureDiscoveryReason(kind string) string {
+	return discoveryReasonInfra + "_" + kind
 }
 
 func grpcCodeLabel(code codes.Code) string {
