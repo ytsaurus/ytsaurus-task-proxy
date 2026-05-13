@@ -129,7 +129,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	userResp, err := s.yt.WhoAmI(ytsdk.WithCredentials(ctx, userCredentials), nil)
 	defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
 	if err != nil {
-		s.logger.Errorf("whoami failed: %v", err)
+		s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
 		defaultMetrics.ObserveAuthYTError("whoami", err)
 		return false, err
 	}
@@ -159,7 +159,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	)
 	defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 	if err != nil {
-		s.logger.Infof("permission check failed: %v", err)
+		s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
 		defaultMetrics.ObserveAuthYTError("permission_check", err)
 		return false, err
 	}

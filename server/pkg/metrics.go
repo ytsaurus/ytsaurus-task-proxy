@@ -89,7 +89,7 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			prometheus.HistogramOpts{
 				Name:    "yt_task_proxy_ytsaurus_request_duration_seconds",
 				Help:    "YTsaurus request duration grouped by request kind.",
-				Buckets: []float64{0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5},
+				Buckets: []float64{0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5},
 			},
 			[]string{"request"},
 		),
