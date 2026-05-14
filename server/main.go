@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"flag"
-	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -22,7 +21,7 @@ func main() {
 	ctx := context.Background()
 
 	var args struct {
-		namespace              string
+		ytProxy                string
 		ytTokenPath            string
 		baseDomain             string
 		dirPath                string
@@ -33,7 +32,7 @@ func main() {
 		authCacheTTLSeconds    int
 		authCacheCapacity      int
 	}
-	flag.StringVar(&args.namespace, "namespace", "", "k8s namespace")
+	flag.StringVar(&args.ytProxy, "yt-proxy", "", "YT proxy host")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
 	flag.StringVar(&args.baseDomain, "base-domain", "", "base domain for jobs")
 	flag.StringVar(&args.dirPath, "dir-path", "", "Task proxy directory path")
@@ -45,8 +44,8 @@ func main() {
 	flag.IntVar(&args.authCacheCapacity, "auth-cache-capacity", 0, "auth cache maximum number of entries (0 means unlimited)")
 	flag.Parse()
 
-	if args.namespace == "" {
-		log.Fatal("'namespace' argument is required")
+	if args.ytProxy == "" {
+		log.Fatal("'yt-proxy' argument is required")
 	}
 	if args.ytTokenPath == "" {
 		log.Fatal("'yt-token-path' argument is required")
@@ -67,9 +66,11 @@ func main() {
 	}
 	ytToken := strings.TrimSpace(string(ytTokenBytes))
 
-	ytProxy := fmt.Sprintf("http-proxies-lb.%s.svc.cluster.local", args.namespace)
-	ytClient, err := pkg.CreateYTClient(ytProxy, &ytsdk.TokenCredentials{Token: ytToken})
+	logger := pkg.SimpleLogger{}
+
+	ytClient, err := pkg.CreateYTClient(args.ytProxy, &ytsdk.TokenCredentials{Token: ytToken}, &logger)
 	if err != nil {
+		pkg.DefaultMetrics().ObserveYTError("create_client", err)
 		log.Fatalf("failed to create YT client: %v", err)
 	}
 
@@ -80,13 +81,11 @@ func main() {
 		}
 	}
 
-	logger := pkg.SimpleLogger{}
-
 	cache := cachev3.NewSnapshotCache(true, cachev3.IDHash{}, logger)
 
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
 
-	authServer := pkg.CreateAuthServer(ytClient, ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
+	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
 		Enabled:    args.authCacheEnabled,
 		TTLSeconds: args.authCacheTTLSeconds,
 		Capacity:   args.authCacheCapacity,
@@ -95,11 +94,20 @@ func main() {
 	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, authServer, taskDiscovery, cache)
 
 	go func() {
+		if err := pkg.ServeMetrics(pkg.DefaultGatherer()); err != nil {
+			log.Fatalf("failed to serve metrics: %v", err)
+		}
+	}()
+
+	go func() {
 		var version string
+		discoveryPeriod := time.Duration(args.discoveryPeriodSeconds) * time.Second
 		for {
 			tasks, err := taskDiscovery.Discovery(ctx)
 			if err != nil {
+				pkg.DefaultMetrics().ObserveDiscoveryFailure("discovery", err)
 				logger.Errorf("failed to discover tasks: %v", err)
+				time.Sleep(discoveryPeriod)
 				continue // preserve old version of table, err is probably transient
 			}
 
@@ -117,6 +125,7 @@ func main() {
 
 			newVersion := pkg.Hash(buf.Bytes())
 			if version == newVersion {
+				pkg.DefaultMetrics().ObserveDiscoverySuccess("no_changes")
 				logger.Debugf("no changes in discovered tasks")
 			} else {
 				logger.Infof("%d tasks discovered:\n%s", len(tasks), tasks)
@@ -124,12 +133,15 @@ func main() {
 
 				err = taskUpdater.Update(ctx, hashToTask, operationAliasToID, version)
 				if err != nil {
+					pkg.DefaultMetrics().ObserveDiscoveryFailure("update", err)
 					logger.Errorf("failed to update tasks: %v", err)
 					version = "" // drop version so we will retry update on next iteration
+				} else {
+					pkg.DefaultMetrics().ObserveDiscoverySuccess("updated")
 				}
 			}
 
-			time.Sleep(time.Duration(args.discoveryPeriodSeconds) * time.Second)
+			time.Sleep(discoveryPeriod)
 		}
 	}()
 	if err := pkg.ServeGRPC(serverv3.NewServer(ctx, cache, nil), authServer); err != nil {
