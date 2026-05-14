@@ -20,7 +20,7 @@ func (s *failingSnapshotSetter) SetSnapshot(_ context.Context, _ string, _ cache
 }
 
 func TestUpdateDoesNotChangeAuthDataIfSetSnapshotFails(t *testing.T) {
-	authServer := CreateAuthServer(nil, &SimpleLogger{}, "")
+	authServer := CreateAuthServer(nil, "", &SimpleLogger{}, "", AuthCacheConfig{})
 
 	oldTask := Task{
 		operationID: "op-old",

@@ -56,6 +56,11 @@ spec:
         - "-discovery-period-seconds={{ .Values.discoveryPeriodSeconds }}"
         - "-auth-enabled={{ .Values.auth.enabled }}"
         - "-auth-cookie-name={{ .Values.auth.cookieName }}"
+        - "-auth-cache-enabled={{ .Values.auth.cache.enabled }}"
+        - "-auth-cache-ttl-seconds={{ .Values.auth.cache.ttlSeconds }}"
+        - "-auth-cache-capacity={{ .Values.auth.cache.capacity }}"
+        - "-auth-cache-max-concurrent-backend-requests={{ .Values.auth.cache.maxConcurrentBackendRequests }}"
+        - "-auth-cache-refresh-before-seconds={{ .Values.auth.cache.refreshBeforeSeconds }}"
         ports:
         - containerPort: 9090
           name: grpc

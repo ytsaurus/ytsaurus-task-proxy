@@ -17,6 +17,14 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+type AuthCacheConfig struct {
+	Enabled                      bool
+	TTLSeconds                   int
+	Capacity                     int
+	MaxConcurrentBackendRequests int
+	RefreshBeforeSeconds         int
+}
+
 type authServer struct {
 	authv3.UnimplementedAuthorizationServer
 
@@ -24,17 +32,22 @@ type authServer struct {
 	hashToTasks        map[string]Task
 	operationAliasToID map[string]string
 	yt                 ytsdk.Client
+	ytProxy            string
 	logger             *SimpleLogger
 	authCookieName     string
+	cache              *authPermissionCache // cache is nil when caching is disabled.
 }
 
-func CreateAuthServer(yt ytsdk.Client, logger *SimpleLogger, authCookieName string) *authServer {
+func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string, cacheCfg AuthCacheConfig) *authServer {
+	cache := newAuthPermissionCache(cacheCfg, logger)
 	return &authServer{
 		hashToTasks:    make(map[string]Task),
 		mx:             sync.RWMutex{},
 		yt:             yt,
+		ytProxy:        ytProxy,
 		logger:         logger,
 		authCookieName: authCookieName,
+		cache:          cache,
 	}
 }
 
@@ -125,47 +138,66 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		return false, nil
 	}
 
-	whoAmIStarted := time.Now()
-	userResp, err := s.yt.WhoAmI(ytsdk.WithCredentials(ctx, userCredentials), nil)
-	defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
+	cacheKey := authCacheKey{
+		credentials: credentialsKey(userCredentials),
+		operationID: operationID,
+	}
+
+	allowed, _, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
+		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
+		if err != nil {
+			defaultMetrics.ObserveAuthYTError("create_client", err)
+			return false, "", err
+		}
+
+		whoAmIStarted := time.Now()
+		userResp, err := userYT.WhoAmI(checkCtx, nil)
+		defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
+		if err != nil {
+			s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
+			defaultMetrics.ObserveAuthYTError("whoami", err)
+			return false, "", err
+		}
+
+		user := userResp.Login
+		if user == "" {
+			s.logger.Errorf("user not identified by provided credentials: %v", userResp)
+			defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
+			return false, "", nil
+		}
+		s.logger.Debugf("auth user is %q", user)
+
+		operationIDg, err := guid.ParseString(operationID)
+		if err != nil {
+			s.logger.Warnf("invalid operation ID %s", operationID)
+			defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
+			return false, "", nil
+		}
+
+		permissionCheckStarted := time.Now()
+		resp, err := s.yt.CheckOperationPermission(
+			checkCtx,
+			yt.OperationID(operationIDg),
+			user,
+			yt.PermissionRead,
+			nil,
+		)
+		defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
+		if err != nil {
+			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
+			defaultMetrics.ObserveAuthYTError("permission_check", err)
+			return false, "", err
+		}
+
+		allowed := resp.Action == "allow"
+		s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
+		return allowed, user, nil
+	})
 	if err != nil {
-		s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
-		defaultMetrics.ObserveAuthYTError("whoami", err)
 		return false, err
 	}
 
-	user := userResp.Login
-	if user == "" {
-		s.logger.Errorf("user not identified by provided credentials: %v", userResp)
-		defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
-		return false, nil
-	}
-	s.logger.Debugf("auth user is %q", user)
-
-	operationIDg, err := guid.ParseString(operationID)
-	if err != nil {
-		s.logger.Warnf("invalid operation ID %s", operationID)
-		defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
-		return false, nil
-	}
-
-	permissionCheckStarted := time.Now()
-	resp, err := s.yt.CheckOperationPermission(
-		ctx,
-		yt.OperationID(operationIDg),
-		user,
-		yt.PermissionRead,
-		nil,
-	)
-	defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
-	if err != nil {
-		s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
-		defaultMetrics.ObserveAuthYTError("permission_check", err)
-		return false, err
-	}
-
-	s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-	if resp.Action != "allow" {
+	if !allowed {
 		defaultMetrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
 		return false, nil
 	}
