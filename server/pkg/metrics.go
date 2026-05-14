@@ -22,6 +22,11 @@ type Metrics struct {
 	authFailures             *prometheus.CounterVec
 	authErrors               *prometheus.CounterVec
 	authInfrastructureErrors *prometheus.CounterVec
+	authCacheEntries         prometheus.Gauge
+	authCacheHits            prometheus.Counter
+	authCacheMisses          prometheus.Counter
+	authCacheInflightBackend prometheus.Gauge
+	authCacheWaitingRequests prometheus.Gauge
 	discoverySuccesses       *prometheus.CounterVec
 	discoveryFailures        *prometheus.CounterVec
 	discoveryErrors          *prometheus.CounterVec
@@ -83,6 +88,36 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 			},
 			[]string{"stage", "kind", "grpc_code"},
 		),
+		authCacheEntries: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "yt_task_proxy_auth_cache_entries",
+				Help: "Current number of entries in auth cache.",
+			},
+		),
+		authCacheHits: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_auth_cache_hits_total",
+				Help: "Total number of auth cache hits.",
+			},
+		),
+		authCacheMisses: prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_auth_cache_misses_total",
+				Help: "Total number of auth cache misses.",
+			},
+		),
+		authCacheInflightBackend: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "yt_task_proxy_auth_cache_inflight_backend_requests",
+				Help: "Current number of in-flight backend requests for auth cache.",
+			},
+		),
+		authCacheWaitingRequests: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "yt_task_proxy_auth_cache_waiting_requests",
+				Help: "Current number of requests waiting on in-flight auth cache backend requests.",
+			},
+		),
 		discoverySuccesses: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "yt_task_proxy_discovery_success_total",
@@ -133,6 +168,11 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		m.authFailures,
 		m.authErrors,
 		m.authInfrastructureErrors,
+		m.authCacheEntries,
+		m.authCacheHits,
+		m.authCacheMisses,
+		m.authCacheInflightBackend,
+		m.authCacheWaitingRequests,
 		m.discoverySuccesses,
 		m.discoveryFailures,
 		m.discoveryErrors,
@@ -177,6 +217,38 @@ func (m *Metrics) ObserveYTDuration(request string, duration time.Duration) {
 func (m *Metrics) ObserveAuthYTError(stage string, err error) string {
 	m.ObserveYTError(stage, err)
 	return m.ObserveAuthFailure(stage, err)
+}
+
+func (m *Metrics) ObserveAuthCacheHit() {
+	m.authCacheHits.Inc()
+}
+
+func (m *Metrics) ObserveAuthCacheMiss() {
+	m.authCacheMisses.Inc()
+}
+
+func (m *Metrics) IncAuthCacheEntries() {
+	m.authCacheEntries.Inc()
+}
+
+func (m *Metrics) DecAuthCacheEntries() {
+	m.authCacheEntries.Dec()
+}
+
+func (m *Metrics) IncAuthCacheInflightBackendRequests() {
+	m.authCacheInflightBackend.Inc()
+}
+
+func (m *Metrics) DecAuthCacheInflightBackendRequests() {
+	m.authCacheInflightBackend.Dec()
+}
+
+func (m *Metrics) IncAuthCacheWaitingRequests() {
+	m.authCacheWaitingRequests.Inc()
+}
+
+func (m *Metrics) DecAuthCacheWaitingRequests() {
+	m.authCacheWaitingRequests.Dec()
 }
 
 func (m *Metrics) ObserveDiscoverySuccess(reason string) {

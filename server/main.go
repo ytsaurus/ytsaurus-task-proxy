@@ -21,16 +21,18 @@ func main() {
 	ctx := context.Background()
 
 	var args struct {
-		ytProxy                string
-		ytTokenPath            string
-		baseDomain             string
-		dirPath                string
-		discoveryPeriodSeconds uint
-		authEnabled            bool
-		authCookieName         string
-		authCacheEnabled       bool
-		authCacheTTLSeconds    int
-		authCacheCapacity      int
+		ytProxy                 string
+		ytTokenPath             string
+		baseDomain              string
+		dirPath                 string
+		discoveryPeriodSeconds  uint
+		authEnabled             bool
+		authCookieName          string
+		authCacheEnabled        bool
+		authCacheTTLSeconds     int
+		authCacheCapacity       int
+		authCacheMaxConcurrency int
+		authCacheRefreshBefore  int
 	}
 	flag.StringVar(&args.ytProxy, "yt-proxy", "", "YT proxy host")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
@@ -42,6 +44,8 @@ func main() {
 	flag.BoolVar(&args.authCacheEnabled, "auth-cache-enabled", false, "enable auth cache")
 	flag.IntVar(&args.authCacheTTLSeconds, "auth-cache-ttl-seconds", 0, "auth cache entry TTL in seconds (0 means no expiration)")
 	flag.IntVar(&args.authCacheCapacity, "auth-cache-capacity", 0, "auth cache maximum number of entries (0 means unlimited)")
+	flag.IntVar(&args.authCacheMaxConcurrency, "auth-cache-max-concurrent-backend-requests", 0, "auth cache max concurrent backend requests per key on misses (0 means unlimited)")
+	flag.IntVar(&args.authCacheRefreshBefore, "auth-cache-refresh-before-seconds", 0, "auth cache proactive refresh threshold in seconds before TTL deadline (0 disables proactive refresh)")
 	flag.Parse()
 
 	if args.ytProxy == "" {
@@ -58,6 +62,18 @@ func main() {
 	}
 	if args.discoveryPeriodSeconds < 1 || args.discoveryPeriodSeconds > 24*60*60 {
 		log.Fatal("'discovery-period-seconds' argument must be positive and not greater than 24 hours")
+	}
+	if args.authCacheTTLSeconds < 0 {
+		log.Fatal("'auth-cache-ttl-seconds' argument must be non-negative")
+	}
+	if args.authCacheCapacity < 0 {
+		log.Fatal("'auth-cache-capacity' argument must be non-negative")
+	}
+	if args.authCacheMaxConcurrency < 0 {
+		log.Fatal("'auth-cache-max-concurrent-backend-requests' argument must be non-negative")
+	}
+	if args.authCacheRefreshBefore < 0 {
+		log.Fatal("'auth-cache-refresh-before-seconds' argument must be non-negative")
 	}
 
 	ytTokenBytes, err := os.ReadFile(args.ytTokenPath)
@@ -86,9 +102,11 @@ func main() {
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
 
 	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
-		Enabled:    args.authCacheEnabled,
-		TTLSeconds: args.authCacheTTLSeconds,
-		Capacity:   args.authCacheCapacity,
+		Enabled:                      args.authCacheEnabled,
+		TTLSeconds:                   args.authCacheTTLSeconds,
+		Capacity:                     args.authCacheCapacity,
+		MaxConcurrentBackendRequests: args.authCacheMaxConcurrency,
+		RefreshBeforeSeconds:         args.authCacheRefreshBefore,
 	})
 
 	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, authServer, taskDiscovery, cache)

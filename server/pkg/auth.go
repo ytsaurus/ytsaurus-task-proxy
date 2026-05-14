@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru/v2/expirable"
-
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 	"go.ytsaurus.tech/yt/go/guid"
@@ -20,30 +18,11 @@ import (
 )
 
 type AuthCacheConfig struct {
-	Enabled    bool
-	TTLSeconds int
-	Capacity   int
-}
-
-type authCacheKey struct {
-	credentials string
-	operationID string
-}
-
-func credentialsKey(creds ytsdk.Credentials) string {
-	if creds == nil {
-		return ""
-	}
-	switch v := creds.(type) {
-	case *ytsdk.TokenCredentials:
-		return "token:" + v.Token
-	case *ytsdk.BearerCredentials:
-		return "bearer:" + v.Token
-	case *ytsdk.CookieCredentials:
-		return "cookie:" + v.Cookie.Value
-	default:
-		return fmt.Sprintf("%T:%v", v, v)
-	}
+	Enabled                      bool
+	TTLSeconds                   int
+	Capacity                     int
+	MaxConcurrentBackendRequests int
+	RefreshBeforeSeconds         int
 }
 
 type authServer struct {
@@ -56,15 +35,11 @@ type authServer struct {
 	ytProxy            string
 	logger             *SimpleLogger
 	authCookieName     string
-	cache              *lru.LRU[authCacheKey, bool] // cache is nil when caching is disabled.
+	cache              *authPermissionCache // cache is nil when caching is disabled.
 }
 
 func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string, cacheCfg AuthCacheConfig) *authServer {
-	var cache *lru.LRU[authCacheKey, bool]
-	if cacheCfg.Enabled {
-		ttl := time.Duration(cacheCfg.TTLSeconds) * time.Second
-		cache = lru.NewLRU[authCacheKey, bool](cacheCfg.Capacity, nil, ttl)
-	}
+	cache := newAuthPermissionCache(cacheCfg, logger)
 	return &authServer{
 		hashToTasks:    make(map[string]Task),
 		mx:             sync.RWMutex{},
@@ -167,67 +142,59 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		credentials: credentialsKey(userCredentials),
 		operationID: operationID,
 	}
-	if s.cache != nil {
-		if allowed, ok := s.cache.Get(cacheKey); ok {
-			s.logger.Debugf("cache hit for operation %q: allowed=%v", operationID, allowed)
-			if allowed {
-				defaultMetrics.ObserveAuthSuccess(authReasonAuthorized)
-			} else {
-				defaultMetrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
-			}
-			return allowed, nil
+
+	allowed, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, error) {
+		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
+		if err != nil {
+			defaultMetrics.ObserveAuthYTError("create_client", err)
+			return false, err
 		}
-	}
 
-	userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
+		whoAmIStarted := time.Now()
+		userResp, err := userYT.WhoAmI(checkCtx, nil)
+		defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
+		if err != nil {
+			s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
+			defaultMetrics.ObserveAuthYTError("whoami", err)
+			return false, err
+		}
+
+		user := userResp.Login
+		if user == "" {
+			s.logger.Errorf("user not identified by provided credentials: %v", userResp)
+			defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
+			return false, nil
+		}
+		s.logger.Debugf("auth user is %q", user)
+
+		operationIDg, err := guid.ParseString(operationID)
+		if err != nil {
+			s.logger.Warnf("invalid operation ID %s", operationID)
+			defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
+			return false, nil
+		}
+
+		permissionCheckStarted := time.Now()
+		resp, err := s.yt.CheckOperationPermission(
+			checkCtx,
+			yt.OperationID(operationIDg),
+			user,
+			yt.PermissionRead,
+			nil,
+		)
+		defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
+		if err != nil {
+			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
+			defaultMetrics.ObserveAuthYTError("permission_check", err)
+			return false, err
+		}
+
+		allowed := resp.Action == "allow"
+		s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
+		return allowed, nil
+	})
 	if err != nil {
-		defaultMetrics.ObserveAuthYTError("create_client", err)
 		return false, err
-	}
-
-	whoAmIStarted := time.Now()
-	userResp, err := userYT.WhoAmI(ctx, nil)
-	defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
-	if err != nil {
-		s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
-		defaultMetrics.ObserveAuthYTError("whoami", err)
-		return false, err
-	}
-
-	user := userResp.Login
-	if user == "" {
-		s.logger.Errorf("user not identified by provided credentials: %v", userResp)
-		defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
-		return false, nil
-	}
-	s.logger.Debugf("auth user is %q", user)
-
-	operationIDg, err := guid.ParseString(operationID)
-	if err != nil {
-		s.logger.Warnf("invalid operation ID %s", operationID)
-		defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
-		return false, nil
-	}
-
-	permissionCheckStarted := time.Now()
-	resp, err := s.yt.CheckOperationPermission(
-		ctx,
-		yt.OperationID(operationIDg),
-		user,
-		yt.PermissionRead,
-		nil,
-	)
-	defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
-	if err != nil {
-		s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
-		defaultMetrics.ObserveAuthYTError("permission_check", err)
-		return false, err
-	}
-
-	allowed := resp.Action == "allow"
-	s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-	if s.cache != nil {
-		s.cache.Add(cacheKey, allowed)
 	}
 
 	if !allowed {

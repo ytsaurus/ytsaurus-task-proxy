@@ -17,8 +17,10 @@ auth:
   cookieName: YTCypressCookie
   cache:
     enabled: false
-    ttlSeconds: 0
-    capacity: 0
+    ttlSeconds: 30
+    capacity: 1000
+    maxConcurrentBackendRequests: 16
+    refreshBeforeSeconds: 5
 
 tls:
   enabled: false
