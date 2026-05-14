@@ -1,0 +1,34 @@
+{{- if .Values.monitoring.enabled }}
+
+{{- if eq .Values.monitoring.engine "prometheus" }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+{{- else if eq .Values.monitoring.engine "victoriametrics" }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+{{- else }}
+    {{- fail "Unexpected monitoring engine: $.Values.monitoring.engine" }}
+{{- end }}
+metadata:
+  name: task-proxy-service-monitor
+  namespace: {{ .Release.Namespace }}
+  {{- if eq .Values.monitoring.engine "prometheus" }}
+  labels:
+    release: prometheus-stack
+  {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      yt_component: task-proxy
+  endpoints:
+    - port: metrics
+      path: /metrics/prometheus
+      interval: 30s
+    - port: envoy-metrics
+      path: /stats/prometheus
+      interval: 30s
+
+{{- end }}

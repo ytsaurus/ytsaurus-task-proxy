@@ -7,6 +7,10 @@ import (
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 )
 
+type snapshotSetter interface {
+	SetSnapshot(ctx context.Context, node string, snapshot cachev3.ResourceSnapshot) error
+}
+
 type taskUpdater struct {
 	baseDomain  string
 	tls         bool
@@ -14,7 +18,7 @@ type taskUpdater struct {
 
 	authServer    *authServer
 	taskDiscovery *taskDiscovery
-	cache         cachev3.SnapshotCache
+	cache         snapshotSetter
 }
 
 func CreateTaskUpdater(
@@ -23,7 +27,7 @@ func CreateTaskUpdater(
 	authEnabled bool,
 	authServer *authServer,
 	taskDiscovery *taskDiscovery,
-	cache cachev3.SnapshotCache,
+	cache snapshotSetter,
 ) *taskUpdater {
 	return &taskUpdater{
 		baseDomain:    baseDomain,
@@ -46,11 +50,10 @@ func (u *taskUpdater) Update(
 		return fmt.Errorf("failed to make snapshot: %v", err)
 	}
 
-	u.authServer.SetTasksData(hashToTask, operationAliasToID)
-
 	if err := u.cache.SetSnapshot(ctx, NodeID, snapshot); err != nil {
 		return fmt.Errorf("failed to set snapshot: %v", err)
 	}
+	u.authServer.SetTasksData(hashToTask, operationAliasToID)
 
 	err = u.taskDiscovery.save(ctx, hashToTask)
 	if err != nil {

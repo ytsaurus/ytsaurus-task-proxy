@@ -1,0 +1,80 @@
+{{- if and .Values.monitoring.enabled .Values.monitoring.alerts.enabled }}
+
+{{- if eq .Values.monitoring.engine "prometheus" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+{{- else if eq .Values.monitoring.engine "victoriametrics" }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMRule
+{{- else }}
+    {{- fail "Unexpected monitoring engine: $.Values.monitoring.engine" }}
+{{- end }}
+metadata:
+  name: task-proxy-alerts
+  namespace: {{ .Release.Namespace }}
+  {{- if eq .Values.monitoring.engine "prometheus" }}
+  labels:
+    release: prometheus-stack
+  {{- end }}
+spec:
+  groups:
+    - name: task-proxy
+      rules:
+        - alert: TaskProxyAuthorizationInfrastructureFailures
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total[1m])) > {{ .Values.monitoring.alerts.authInfrastructureFailuresPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy authorization infrastructure failures exceed threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.authInfrastructureFailuresPerMinuteThreshold }} authorization infrastructure failures over the last minute.
+        - alert: TaskProxyAuthorizationContextDeadlineExceeded
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="context_deadline_exceeded"}[1m])) > {{ .Values.monitoring.alerts.authContextDeadlineExceededPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy authorization context deadline exceeded rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.authContextDeadlineExceededPerMinuteThreshold }} context deadline exceeded authorization failures over the last minute.
+        - alert: TaskProxyAuthorizationGrpcUnavailable
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="grpc_unavailable"}[1m])) > {{ .Values.monitoring.alerts.authGrpcUnavailablePerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy authorization gRPC unavailable rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.authGrpcUnavailablePerMinuteThreshold }} gRPC unavailable authorization failures over the last minute.
+        - alert: TaskProxyAuthorizationConnectionTimeout
+          expr: sum(increase(yt_task_proxy_auth_infra_errors_total{kind="connection_timeout"}[1m])) > {{ .Values.monitoring.alerts.authConnectionTimeoutPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy authorization connection timeout rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.authConnectionTimeoutPerMinuteThreshold }} connection timeout authorization failures over the last minute.
+        - alert: TaskProxyDiscoveryInfrastructureFailures
+          expr: sum(increase(yt_task_proxy_discovery_infra_errors_total[1m])) > {{ .Values.monitoring.alerts.discoveryInfrastructureFailuresPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy discovery infrastructure failures exceed threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.discoveryInfrastructureFailuresPerMinuteThreshold }} discovery infrastructure failures over the last minute.
+        - alert: TaskProxyDiscoveryContextDeadlineExceeded
+          expr: sum(increase(yt_task_proxy_discovery_infra_errors_total{kind="context_deadline_exceeded"}[1m])) > {{ .Values.monitoring.alerts.discoveryContextDeadlineExceededPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy discovery context deadline exceeded rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.discoveryContextDeadlineExceededPerMinuteThreshold }} context deadline exceeded discovery failures over the last minute.
+        - alert: TaskProxyDiscoveryGrpcUnavailable
+          expr: sum(increase(yt_task_proxy_discovery_infra_errors_total{kind="grpc_unavailable"}[1m])) > {{ .Values.monitoring.alerts.discoveryGrpcUnavailablePerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy discovery gRPC unavailable rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.discoveryGrpcUnavailablePerMinuteThreshold }} gRPC unavailable discovery failures over the last minute.
+        - alert: TaskProxyDiscoveryConnectionTimeout
+          expr: sum(increase(yt_task_proxy_discovery_infra_errors_total{kind="connection_timeout"}[1m])) > {{ .Values.monitoring.alerts.discoveryConnectionTimeoutPerMinuteThreshold }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Task proxy discovery connection timeout rate exceeds threshold
+            description: Task proxy observed more than {{ .Values.monitoring.alerts.discoveryConnectionTimeoutPerMinuteThreshold }} connection timeout discovery failures over the last minute.
+
+{{- end }}

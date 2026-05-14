@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
@@ -23,17 +24,15 @@ type authServer struct {
 	hashToTasks        map[string]Task
 	operationAliasToID map[string]string
 	yt                 ytsdk.Client
-	ytProxy            string
 	logger             *SimpleLogger
 	authCookieName     string
 }
 
-func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string) *authServer {
+func CreateAuthServer(yt ytsdk.Client, logger *SimpleLogger, authCookieName string) *authServer {
 	return &authServer{
 		hashToTasks:    make(map[string]Task),
 		mx:             sync.RWMutex{},
 		yt:             yt,
-		ytProxy:        ytProxy,
 		logger:         logger,
 		authCookieName: authCookieName,
 	}
@@ -47,6 +46,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 
 	task, err := s.findTaskByRequest(host, headers)
 	if err != nil {
+		defaultMetrics.ObserveAuthFailure(authReasonTaskLookup, nil)
 		s.logger.Warnf("failed to find task during auth check: %s", err)
 		return deniedResponse, nil
 	}
@@ -54,6 +54,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	// skip auth for UI services for statics; currently it is the case for SPYT UI
 	if task.service == "ui" && strings.HasPrefix(path, "/static") {
 		s.logger.Debugf("skip auth for 'ui' service for statics on path %s", path)
+		defaultMetrics.ObserveAuthSuccess(authReasonStaticBypass)
 		return okResponse, nil
 	}
 
@@ -119,22 +120,24 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
+		s.logger.Warnf("request without credentials, headers: %v", headers)
+		defaultMetrics.ObserveAuthFailure(authReasonCredentials, nil)
 		return false, nil
 	}
 
-	userYT, err := CreateYTClient(s.ytProxy, userCredentials)
+	whoAmIStarted := time.Now()
+	userResp, err := s.yt.WhoAmI(ytsdk.WithCredentials(ctx, userCredentials), nil)
+	defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
 	if err != nil {
-		return false, err
-	}
-
-	userResp, err := userYT.WhoAmI(ctx, nil)
-	if err != nil {
+		s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
+		defaultMetrics.ObserveAuthYTError("whoami", err)
 		return false, err
 	}
 
 	user := userResp.Login
 	if user == "" {
-		s.logger.Warnf("user not identified by provided credentials")
+		s.logger.Errorf("user not identified by provided credentials: %v", userResp)
+		defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
 		return false, nil
 	}
 	s.logger.Debugf("auth user is %q", user)
@@ -142,9 +145,11 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	operationIDg, err := guid.ParseString(operationID)
 	if err != nil {
 		s.logger.Warnf("invalid operation ID %s", operationID)
+		defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
 		return false, nil
 	}
 
+	permissionCheckStarted := time.Now()
 	resp, err := s.yt.CheckOperationPermission(
 		ctx,
 		yt.OperationID(operationIDg),
@@ -152,12 +157,20 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		yt.PermissionRead,
 		nil,
 	)
+	defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 	if err != nil {
+		s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
+		defaultMetrics.ObserveAuthYTError("permission_check", err)
 		return false, err
 	}
 
 	s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-	return resp.Action == "allow", nil
+	if resp.Action != "allow" {
+		defaultMetrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
+		return false, nil
+	}
+	defaultMetrics.ObserveAuthSuccess(authReasonAuthorized)
+	return true, nil
 }
 
 func (s *authServer) getYTCredentialsFromHeaders(headers map[string]string) ytsdk.Credentials {
