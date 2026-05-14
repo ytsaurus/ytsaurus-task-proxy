@@ -143,11 +143,11 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		operationID: operationID,
 	}
 
-	allowed, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, error) {
+	allowed, _, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
 		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
 		if err != nil {
 			defaultMetrics.ObserveAuthYTError("create_client", err)
-			return false, err
+			return false, "", err
 		}
 
 		whoAmIStarted := time.Now()
@@ -156,14 +156,14 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		if err != nil {
 			s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
 			defaultMetrics.ObserveAuthYTError("whoami", err)
-			return false, err
+			return false, "", err
 		}
 
 		user := userResp.Login
 		if user == "" {
 			s.logger.Errorf("user not identified by provided credentials: %v", userResp)
 			defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
-			return false, nil
+			return false, "", nil
 		}
 		s.logger.Debugf("auth user is %q", user)
 
@@ -171,7 +171,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		if err != nil {
 			s.logger.Warnf("invalid operation ID %s", operationID)
 			defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
-			return false, nil
+			return false, "", nil
 		}
 
 		permissionCheckStarted := time.Now()
@@ -186,12 +186,12 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		if err != nil {
 			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
 			defaultMetrics.ObserveAuthYTError("permission_check", err)
-			return false, err
+			return false, "", err
 		}
 
 		allowed := resp.Action == "allow"
 		s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-		return allowed, nil
+		return allowed, user, nil
 	})
 	if err != nil {
 		return false, err
