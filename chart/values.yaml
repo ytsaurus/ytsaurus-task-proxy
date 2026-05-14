@@ -19,7 +19,7 @@ auth:
     enabled: false
     ttlSeconds: 30
     capacity: 1000
-    maxConcurrentBackendRequests: 16
+    maxConcurrentBackendRequests: 2
     refreshBeforeSeconds: 5
 
 tls:
