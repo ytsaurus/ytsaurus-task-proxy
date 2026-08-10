@@ -12,17 +12,17 @@ jobs:
 
     steps:
       - name: checkout sources
-        uses: actions/checkout@v3
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: 'server/go.mod'
 
       - name: Set up Helm
-        uses: azure/setup-helm@v1
+        uses: azure/setup-helm@v5.0.1
         with:
           version: v3.11.2
 
@@ -42,8 +42,15 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set release version env variable
+        shell: bash
         run: |
-          echo "RELEASE_VERSION=${{ inputs.release_version }}" >> "$GITHUB_ENV"
+          release_version='${{ inputs.release_version }}'
+          release_version="${release_version#release/}"
+          if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must have the form X.Y.Z, got: $release_version" >&2
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
 
       - name: Update chart version
         uses: mikefarah/yq@master
@@ -60,4 +67,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          make release RELEASE_VERSION=${{ inputs.release_version }}
+          make release RELEASE_VERSION="$RELEASE_VERSION"
