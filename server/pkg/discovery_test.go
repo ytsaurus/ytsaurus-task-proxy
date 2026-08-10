@@ -18,12 +18,12 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 		{
 			name: "full annotation",
 			annotation: map[string]any{
-				taskProxyEnabledKey: true,
-				taskProxyTasksInfoKey: map[string]any{
+				"enabled": true,
+				"tasks_info": map[string]any{
 					"example_grpc_server": map[string]any{
 						"server": map[string]any{
-							taskProxyProtocolKey:  "grpc",
-							taskProxyPortIndexKey: 0,
+							"protocol":   "grpc",
+							"port_index": 0,
 						},
 					},
 				},
@@ -40,14 +40,14 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 		{
 			name: "minimal annotation",
 			annotation: map[string]any{
-				taskProxyEnabledKey: true,
+				"enabled": true,
 			},
 			expected: []taskServiceInfo{},
 		},
 		{
 			name: "disabled annotation (false)",
 			annotation: map[string]any{
-				taskProxyEnabledKey: false,
+				"enabled": false,
 			},
 			expected: nil,
 		},
@@ -64,12 +64,12 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 		{
 			name: "unknown protocol",
 			annotation: map[string]any{
-				taskProxyEnabledKey: true,
-				taskProxyTasksInfoKey: map[string]any{
+				"enabled": true,
+				"tasks_info": map[string]any{
 					"example_grpc_server": map[string]any{
 						"server": map[string]any{
-							taskProxyProtocolKey:  "dns",
-							taskProxyPortIndexKey: 0,
+							"protocol":   "dns",
+							"port_index": 0,
 						},
 					},
 				},
@@ -79,12 +79,12 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 		{
 			name: "invalid port type",
 			annotation: map[string]any{
-				taskProxyEnabledKey: true,
-				taskProxyTasksInfoKey: map[string]any{
+				"enabled": true,
+				"tasks_info": map[string]any{
 					"example_grpc_server": map[string]any{
 						"server": map[string]any{
-							taskProxyProtocolKey:  "http",
-							taskProxyPortIndexKey: "0",
+							"protocol":   "http",
+							"port_index": "0",
 						},
 					},
 				},
@@ -94,11 +94,11 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 		{
 			name: "missing service attributes",
 			annotation: map[string]any{
-				taskProxyEnabledKey: true,
-				taskProxyTasksInfoKey: map[string]any{
+				"enabled": true,
+				"tasks_info": map[string]any{
 					"example_grpc_server": map[string]any{
 						"server": map[string]any{
-							taskProxyProtocolKey: "http",
+							"protocol": "http",
 						},
 					},
 				},
@@ -128,9 +128,9 @@ func TestParseInteger(t *testing.T) {
 
 func TestParseTaskProxyAnnotationTimeoutOverrides(t *testing.T) {
 	annotation := map[string]any{
-		taskProxyEnabledKey:             true,
-		taskProxyRouteTimeoutSecondsKey: 600,
-		taskProxyStreamIdleTimeoutKey:   120,
+		"enabled":                     true,
+		"route_timeout_seconds":       600,
+		"stream_idle_timeout_seconds": 120,
 	}
 
 	_, overrides := parseTaskProxyAnnotation(annotation)
@@ -141,8 +141,8 @@ func TestParseTaskProxyAnnotationTimeoutOverrides(t *testing.T) {
 
 func TestParseTaskProxyAnnotationRejectsInvalidTimeoutOverrides(t *testing.T) {
 	annotation := map[string]any{
-		taskProxyEnabledKey:             true,
-		taskProxyRouteTimeoutSecondsKey: -1,
+		"enabled":               true,
+		"route_timeout_seconds": -1,
 	}
 
 	services, _ := parseTaskProxyAnnotation(annotation)
