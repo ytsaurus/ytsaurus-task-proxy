@@ -3,6 +3,7 @@ package pkg
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -75,4 +76,12 @@ func TestValidateTask(t *testing.T) {
 			assert.Equal(t, tt.err, tt.task.Validate())
 		})
 	}
+}
+
+func TestTaskIDWithHostPortIncludesTimeoutOverrides(t *testing.T) {
+	withoutOverrides := Task{operationID: "op", taskName: "task", service: "service"}
+	withOverride := withoutOverrides
+	withOverride.timeoutOverrides.routeTimeout = durationPtr(10 * time.Minute)
+
+	assert.NotEqual(t, withoutOverrides.IDWithHostPort(), withOverride.IDWithHostPort())
 }

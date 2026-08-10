@@ -65,7 +65,7 @@ func ServeGRPC(s serverv3.Server, authServer *authServer) error {
 	return gs.Serve(lis)
 }
 
-func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string, tls bool, authEnabled bool) (*cachev3.Snapshot, error) {
+func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string, tls bool, authEnabled bool, timeoutConfig TaskProxyTimeoutConfig) (*cachev3.Snapshot, error) {
 	var clusters []cachetypes.Resource
 	var vhosts []*routev3.VirtualHost
 
@@ -78,7 +78,7 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		var vhostClusters []*routev3.WeightedCluster_ClusterWeight
 		for i, job := range task.jobs {
 			clusterName := fmt.Sprintf("%s-%d", vhostName, i)
-			clusters = append(clusters, makeCluster(clusterName, job.host, job.port, grpc, true))
+			clusters = append(clusters, makeCluster(clusterName, job.host, job.port, grpc, true, timeoutConfig.ConnectTimeout))
 			vhostClusters = append(vhostClusters, &routev3.WeightedCluster_ClusterWeight{
 				Name:   clusterName,
 				Weight: &wrapperspb.UInt32Value{Value: 1},
@@ -86,6 +86,8 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		}
 		action := &routev3.Route_Route{
 			Route: &routev3.RouteAction{
+				Timeout:     durationpb.New(task.timeoutOverrides.routeTimeoutOr(timeoutConfig.RouteTimeout)),
+				IdleTimeout: durationpb.New(task.timeoutOverrides.streamIdleTimeoutOr(timeoutConfig.StreamIdleTimeout)),
 				ClusterSpecifier: &routev3.RouteAction_WeightedClusters{
 					WeightedClusters: &routev3.WeightedCluster{
 						Clusters: vhostClusters,
@@ -158,7 +160,7 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 	})
 
 	if authEnabled {
-		authzCluster := makeCluster(extAuthClusterName, "127.0.0.1", serverPort, true, false)
+		authzCluster := makeCluster(extAuthClusterName, "127.0.0.1", serverPort, true, false, defaultConnectTimeout)
 		clusters = append(clusters, authzCluster)
 	}
 
@@ -281,7 +283,7 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 	return snap, snap.Consistent()
 }
 
-func makeCluster(name string, host string, port uint32, grpc bool, resolveDomain bool) *clusterv3.Cluster {
+func makeCluster(name string, host string, port uint32, grpc bool, resolveDomain bool, connectTimeout time.Duration) *clusterv3.Cluster {
 	discoveryType := clusterv3.Cluster_STATIC
 	if resolveDomain {
 		discoveryType = clusterv3.Cluster_STRICT_DNS
@@ -289,7 +291,7 @@ func makeCluster(name string, host string, port uint32, grpc bool, resolveDomain
 
 	cluster := clusterv3.Cluster{
 		Name:                 name,
-		ConnectTimeout:       durationpb.New(2 * time.Second),
+		ConnectTimeout:       durationpb.New(connectTimeout),
 		ClusterDiscoveryType: &clusterv3.Cluster_Type{Type: discoveryType},
 		LbPolicy:             clusterv3.Cluster_ROUND_ROBIN,
 		LoadAssignment: &endpointv3.ClusterLoadAssignment{

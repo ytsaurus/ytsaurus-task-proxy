@@ -19,20 +19,24 @@ import (
 
 func main() {
 	ctx := context.Background()
+	defaultTimeoutConfig := pkg.DefaultTaskProxyTimeoutConfig()
 
 	var args struct {
-		ytProxy                 string
-		ytTokenPath             string
-		baseDomain              string
-		dirPath                 string
-		discoveryPeriodSeconds  uint
-		authEnabled             bool
-		authCookieName          string
-		authCacheEnabled        bool
-		authCacheTTLSeconds     int
-		authCacheCapacity       int
-		authCacheMaxConcurrency int
-		authCacheRefreshBefore  int
+		ytProxy                  string
+		ytTokenPath              string
+		baseDomain               string
+		dirPath                  string
+		discoveryPeriodSeconds   uint
+		authEnabled              bool
+		authCookieName           string
+		authCacheEnabled         bool
+		authCacheTTLSeconds      int
+		authCacheCapacity        int
+		authCacheMaxConcurrency  int
+		authCacheRefreshBefore   int
+		connectTimeoutSeconds    int
+		routeTimeoutSeconds      int
+		streamIdleTimeoutSeconds int
 	}
 	flag.StringVar(&args.ytProxy, "yt-proxy", "", "YT proxy host")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
@@ -46,6 +50,9 @@ func main() {
 	flag.IntVar(&args.authCacheCapacity, "auth-cache-capacity", 0, "auth cache maximum number of entries (0 means unlimited)")
 	flag.IntVar(&args.authCacheMaxConcurrency, "auth-cache-max-concurrent-backend-requests", 0, "auth cache max concurrent backend requests per key on misses (0 means unlimited)")
 	flag.IntVar(&args.authCacheRefreshBefore, "auth-cache-refresh-before-seconds", 0, "auth cache proactive refresh threshold in seconds before TTL deadline (0 disables proactive refresh)")
+	flag.IntVar(&args.connectTimeoutSeconds, "connect-timeout-seconds", int(defaultTimeoutConfig.ConnectTimeout/time.Second), "maximum time in seconds to establish an upstream job connection")
+	flag.IntVar(&args.routeTimeoutSeconds, "route-timeout-seconds", int(defaultTimeoutConfig.RouteTimeout/time.Second), "maximum time in seconds to wait for a complete upstream response (0 disables the timeout)")
+	flag.IntVar(&args.streamIdleTimeoutSeconds, "stream-idle-timeout-seconds", int(defaultTimeoutConfig.StreamIdleTimeout/time.Second), "maximum idle time in seconds for an upstream request or response stream (0 disables the timeout)")
 	flag.Parse()
 
 	if args.ytProxy == "" {
@@ -74,6 +81,26 @@ func main() {
 	}
 	if args.authCacheRefreshBefore < 0 {
 		log.Fatal("'auth-cache-refresh-before-seconds' argument must be non-negative")
+	}
+	connectTimeout, err := pkg.DurationFromSeconds(args.connectTimeoutSeconds)
+	if err != nil {
+		log.Fatalf("invalid connect timeout: %v", err)
+	}
+	routeTimeout, err := pkg.DurationFromSeconds(args.routeTimeoutSeconds)
+	if err != nil {
+		log.Fatalf("invalid route timeout: %v", err)
+	}
+	streamIdleTimeout, err := pkg.DurationFromSeconds(args.streamIdleTimeoutSeconds)
+	if err != nil {
+		log.Fatalf("invalid stream idle timeout: %v", err)
+	}
+	timeoutConfig := pkg.TaskProxyTimeoutConfig{
+		ConnectTimeout:    connectTimeout,
+		RouteTimeout:      routeTimeout,
+		StreamIdleTimeout: streamIdleTimeout,
+	}
+	if err := timeoutConfig.Validate(); err != nil {
+		log.Fatalf("invalid task proxy timeout configuration: %v", err)
 	}
 
 	ytTokenBytes, err := os.ReadFile(args.ytTokenPath)
@@ -109,7 +136,7 @@ func main() {
 		RefreshBeforeSeconds:         args.authCacheRefreshBefore,
 	})
 
-	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, authServer, taskDiscovery, cache)
+	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, timeoutConfig, authServer, taskDiscovery, cache)
 
 	go func() {
 		if err := pkg.ServeMetrics(pkg.DefaultGatherer()); err != nil {
