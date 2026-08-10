@@ -2,9 +2,14 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_version:
+        description: Release version without the release/ prefix
+        required: true
+        type: string
   push:
     tags:
-      - 'release/0\.[0-9]+\.[0-9]+'
+      - 'release/0.*.*'
 
 jobs:
   release:
@@ -12,4 +17,4 @@ jobs:
     uses: ./.github/workflows/subflow_release.yaml
     secrets: inherit
     with:
-      release_version: ${GITHUB_REF#refs/*/release/}
+      release_version: ${{ inputs.release_version || github.ref_name }}
