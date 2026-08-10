@@ -208,6 +208,12 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		CodecType:            hcmv3.HttpConnectionManager_AUTO,
 		HttpFilters:          httpFilters,
 		Http2ProtocolOptions: &corev3.Http2ProtocolOptions{},
+		// Allow proxying WebSocket connections (e.g. Jupyter RTC / collaboration
+		// endpoints). Without this Envoy strips the Upgrade header and forwards the
+		// request as a plain GET, which the upstream rejects with 400.
+		UpgradeConfigs: []*hcmv3.HttpConnectionManager_UpgradeConfig{
+			{UpgradeType: "websocket"},
+		},
 	}
 
 	var transportSocket *corev3.TransportSocket

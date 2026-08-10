@@ -29,7 +29,14 @@ type Task struct {
 	timeoutOverrides TaskTimeoutOverrides
 }
 
+// taskName and service must stay hyphen-free: they are the last two segments of the
+// alias subdomain (<alias>-<task>-<service>) and parsing relies on that.
 var valueRegexp = regexp.MustCompile(`^[a-z0-9_]{1,30}$`)
+
+// The alias may contain hyphens (strawberry aliases commonly do). Edge hyphens are
+// disallowed so the resulting DNS label stays valid; tryParseAliasSubdomain recovers
+// the alias by taking everything left of the trailing -<task>-<service>.
+var aliasRegexp = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_-]{0,28}[a-z0-9_])?$`)
 
 // Identifies task, for sorting and domain hash
 func (t *Task) ID() string {
@@ -71,24 +78,28 @@ func (t *Task) Validate() error {
 	}
 	// to avoid collisions in alias domains, we should check some fields on regexp
 	for _, f := range []struct {
-		value string
-		name  string
+		value  string
+		name   string
+		regexp *regexp.Regexp
 	}{
 		{
-			value: t.operationAlias,
-			name:  "operationAlias",
+			value:  t.operationAlias,
+			name:   "operationAlias",
+			regexp: aliasRegexp,
 		},
 		{
-			value: t.taskName,
-			name:  "taskName",
+			value:  t.taskName,
+			name:   "taskName",
+			regexp: valueRegexp,
 		},
 		{
-			value: t.service,
-			name:  "service",
+			value:  t.service,
+			name:   "service",
+			regexp: valueRegexp,
 		},
 	} {
-		if !valueRegexp.MatchString(f.value) {
-			return fmt.Errorf("field %q value %q does not match regexp %q", f.name, f.value, valueRegexp.String())
+		if !f.regexp.MatchString(f.value) {
+			return fmt.Errorf("field %q value %q does not match regexp %q", f.name, f.value, f.regexp.String())
 		}
 	}
 	return nil
@@ -111,11 +122,16 @@ func getTaskAliasDomain(task Task, baseDomain string) string {
 }
 
 func tryParseAliasSubdomain(subdomain string) (string, string, string, bool) {
+	// Format: <alias>-<task>-<service>. The alias may itself contain hyphens, so we
+	// parse from the right: task and service are the last two (hyphen-free) segments,
+	// and everything before them is the alias.
 	parts := strings.Split(subdomain, "-")
-	if len(parts) != 3 {
+	if len(parts) < 3 {
 		return "", "", "", false
 	}
-	return parts[0], parts[1], parts[2], true
+	n := len(parts)
+	alias := strings.Join(parts[:n-2], "-")
+	return alias, parts[n-2], parts[n-1], true
 }
 
 func Hash(source []byte) string {
