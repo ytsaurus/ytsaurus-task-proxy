@@ -34,7 +34,7 @@ func TestUpdateDoesNotChangeAuthDataIfSetSnapshotFails(t *testing.T) {
 	)
 
 	cache := &failingSnapshotSetter{err: errors.New("set snapshot failed")}
-	updater := CreateTaskUpdater("example.com", false, true, authServer, &taskDiscovery{}, cache)
+	updater := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), authServer, &taskDiscovery{}, cache)
 
 	newTask := Task{
 		operationID: "op-new",

@@ -2,8 +2,14 @@ package pkg
 
 import (
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
+	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
+	cachetypes "github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,7 +32,7 @@ func TestMakeSnapshot(t *testing.T) {
 		},
 	}
 
-	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true)
+	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig())
 	require.NoError(t, err)
 
 	// Convert snapshot to a structured map for YAML comparison
@@ -231,5 +237,66 @@ listener:
   name: listener_0
 `
 
+	expectedYAML = strings.ReplaceAll(
+		expectedYAML,
+		"route:\n                weightedClusters:",
+		"route:\n                idleTimeout: 300s\n                timeout: 15s\n                weightedClusters:",
+	)
 	assert.YAMLEq(t, expectedYAML, string(resultYAML))
+}
+
+func TestMakeSnapshotTimeouts(t *testing.T) {
+	zero := time.Duration(0)
+	task := Task{
+		operationID: "op123",
+		taskName:    "worker",
+		service:     "api",
+		protocol:    HTTP,
+		jobs:        []HostPort{{host: "10.0.0.1", port: 8080}},
+		timeoutOverrides: TaskTimeoutOverrides{
+			routeTimeout:      durationPtr(10 * time.Minute),
+			streamIdleTimeout: &zero,
+		},
+	}
+	config := TaskProxyTimeoutConfig{
+		ConnectTimeout:    3 * time.Second,
+		RouteTimeout:      15 * time.Second,
+		StreamIdleTimeout: 5 * time.Minute,
+	}
+
+	snapshot, err := makeSnapshot(map[string]Task{"abc12345": task}, "v1", "example.com", false, false, config)
+	require.NoError(t, err)
+
+	cluster := snapshot.GetResources(resourcev3.ClusterType)["op123-worker-api-0"].(*clusterv3.Cluster)
+	require.Equal(t, 3*time.Second, cluster.ConnectTimeout.AsDuration())
+
+	listener := onlyListener(t, snapshot.GetResources(resourcev3.ListenerType))
+	hcm := httpConnectionManager(t, listener)
+	for _, vhost := range hcm.GetRouteConfig().GetVirtualHosts() {
+		for _, route := range vhost.GetRoutes() {
+			action := route.GetRoute()
+			if action == nil || action.GetWeightedClusters() == nil {
+				continue
+			}
+			require.Equal(t, 10*time.Minute, action.GetTimeout().AsDuration())
+			require.Equal(t, time.Duration(0), action.GetIdleTimeout().AsDuration())
+		}
+	}
+}
+
+func onlyListener(t *testing.T, resources map[string]cachetypes.Resource) *listenerv3.Listener {
+	t.Helper()
+	require.Len(t, resources, 1)
+	for _, resource := range resources {
+		return resource.(*listenerv3.Listener)
+	}
+	return nil
+}
+
+func httpConnectionManager(t *testing.T, listener *listenerv3.Listener) *hcmv3.HttpConnectionManager {
+	t.Helper()
+	var hcm hcmv3.HttpConnectionManager
+	err := listener.GetFilterChains()[0].GetFilters()[0].GetTypedConfig().UnmarshalTo(&hcm)
+	require.NoError(t, err)
+	return &hcm
 }

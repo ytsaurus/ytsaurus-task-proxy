@@ -12,6 +12,14 @@ dirPath: //sys/task_proxies
 
 discoveryPeriodSeconds: 60
 
+timeouts:
+  # Maximum time to establish a TCP connection to a task job.
+  connectTimeoutSeconds: 2
+  # Maximum time to wait for a complete upstream response. Set to 0 to disable.
+  routeTimeoutSeconds: 15
+  # Maximum period without request or response traffic. Set to 0 to disable.
+  streamIdleTimeoutSeconds: 300
+
 auth:
   enabled: true
   cookieName: YTCypressCookie

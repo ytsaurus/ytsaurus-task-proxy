@@ -15,6 +15,46 @@ For more information, refer to:
 - [Spark UI](https://ytsaurus.tech/docs/user-guide/data-processing/spyt/spark-ui) to learn how to open UI of [SPYT](https://ytsaurus.tech/docs/en/user-guide/data-processing/spyt/overview) clusters and jobs,
 - [Admin docs](https://ytsaurus.tech/docs/admin-guide/install-task-proxy) for installation instructions.
 
+## Annotating an operation
+
+To publish services from a regular YTsaurus operation, add the `task_proxy` annotation to its specification. `enabled` is required; `tasks_info` describes services by task name, service name, protocol, and zero-based job port index.
+
+```yson
+<"task_proxy"={
+    "enabled"=%true;
+    "tasks_info"={
+        "worker"={
+            "api"={
+                "protocol"="http";
+                "port_index"=0;
+            };
+            "grpc"={
+                "protocol"="grpc";
+                "port_index"=1;
+            };
+        };
+    };
+}>
+```
+
+`protocol` must be `http` or `grpc`. If `tasks_info` is omitted, task-proxy publishes every job port as an HTTP service named `port<N>`.
+
+The annotation can also override request timeouts for every service in that operation:
+
+```yson
+<"task_proxy"={
+    "enabled"=%true;
+    "route_timeout_seconds"=600;
+    "stream_idle_timeout_seconds"=120;
+}>
+```
+
+- `route_timeout_seconds` is the maximum time to receive a complete upstream response after Envoy has received the full request.
+- `stream_idle_timeout_seconds` is the maximum period without request or response traffic.
+- Both values are non-negative integer seconds. `0` explicitly disables the corresponding timeout; an omitted value inherits the global Helm setting.
+
+The Helm defaults are 2 seconds for connecting to a job, 15 seconds for a complete response, and 300 seconds for a stream idle period. Configure them through `timeouts.connectTimeoutSeconds`, `timeouts.routeTimeoutSeconds`, and `timeouts.streamIdleTimeoutSeconds`.
+
 ## Development
 
 Install chart to cluster from local directory using:

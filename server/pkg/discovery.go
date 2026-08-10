@@ -3,6 +3,7 @@ package pkg
 import (
 	"context"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -14,7 +15,17 @@ import (
 	ytsdk "go.ytsaurus.tech/yt/go/yt"
 )
 
-const servicesTableName = "services"
+const (
+	servicesTableName = "services"
+
+	taskProxyAnnotationKey          = "task_proxy"
+	taskProxyEnabledKey             = "enabled"
+	taskProxyTasksInfoKey           = "tasks_info"
+	taskProxyProtocolKey            = "protocol"
+	taskProxyPortIndexKey           = "port_index"
+	taskProxyRouteTimeoutSecondsKey = "route_timeout_seconds"
+	taskProxyStreamIdleTimeoutKey   = "stream_idle_timeout_seconds"
+)
 
 type taskDiscovery struct {
 	baseDomain string
@@ -63,7 +74,7 @@ func (d *taskDiscovery) Discovery(ctx context.Context) (TaskList, error) {
 				d.logger.Errorf("unable to process SPYT standalone cluster operation %q: %v", op.ID, err)
 				continue
 			}
-		} else if _, ok := annotations["task_proxy"]; ok {
+		} else if _, ok := annotations[taskProxyAnnotationKey]; ok {
 			opTasks, err = d.processTaskProxyAnnotatedOperation(ctx, op)
 			if err != nil {
 				d.logger.Errorf("unable to process task proxy annotated operation %q: %v", op.ID, err)
@@ -195,8 +206,8 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 }
 
 func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, op ytsdk.OperationStatus) ([]Task, error) {
-	taskProxyAnnotation := op.RuntimeParameters.Annotations["task_proxy"]
-	taskServiceInfos := parseTaskProxyAnnotation(taskProxyAnnotation)
+	taskProxyAnnotation := op.RuntimeParameters.Annotations[taskProxyAnnotationKey]
+	taskServiceInfos, timeoutOverrides := parseTaskProxyAnnotation(taskProxyAnnotation)
 	if taskServiceInfos == nil {
 		return nil, fmt.Errorf("invalid task_proxy annotation: %v", taskProxyAnnotation)
 	}
@@ -250,11 +261,12 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 			hostParts := strings.Split(job.Address, ":") // job address contains port also
 
 			taskProto := Task{
-				operationID:    op.ID.String(),
-				operationAlias: parseOperationAlias(op),
-				taskName:       job.TaskName,
-				service:        serviceInfo.service,
-				protocol:       serviceInfo.protocol,
+				operationID:      op.ID.String(),
+				operationAlias:   parseOperationAlias(op),
+				taskName:         job.TaskName,
+				service:          serviceInfo.service,
+				protocol:         serviceInfo.protocol,
+				timeoutOverrides: timeoutOverrides,
 			}
 			if _, ok := idToTask[taskProto.ID()]; !ok {
 				idToTask[taskProto.ID()] = &taskProto
@@ -371,32 +383,36 @@ type taskServiceInfo struct {
 	portIndex int
 }
 
-func parseTaskProxyAnnotation(taskProxyAny any) []taskServiceInfo {
+func parseTaskProxyAnnotation(taskProxyAny any) ([]taskServiceInfo, TaskTimeoutOverrides) {
 	taskProxy, ok := taskProxyAny.(map[string]any)
 	if !ok {
-		return nil
+		return nil, TaskTimeoutOverrides{}
 	}
-	enabledAny, ok := taskProxy["enabled"]
+	enabledAny, ok := taskProxy[taskProxyEnabledKey]
 	if !ok {
-		return nil
+		return nil, TaskTimeoutOverrides{}
 	}
 	enabled, ok := enabledAny.(bool)
 	if !ok {
-		return nil
+		return nil, TaskTimeoutOverrides{}
 	}
 	if !enabled {
-		return nil
+		return nil, TaskTimeoutOverrides{}
+	}
+	timeoutOverrides, ok := parseTaskTimeoutOverrides(taskProxy)
+	if !ok {
+		return nil, TaskTimeoutOverrides{}
 	}
 
 	taskServiceInfos := make([]taskServiceInfo, 0)
-	tasksInfoAny, ok := taskProxy["tasks_info"]
+	tasksInfoAny, ok := taskProxy[taskProxyTasksInfoKey]
 	if !ok {
-		return taskServiceInfos
+		return taskServiceInfos, timeoutOverrides
 	}
 
 	tasksInfo, ok := tasksInfoAny.(map[string]any)
 	if !ok {
-		return taskServiceInfos
+		return taskServiceInfos, timeoutOverrides
 	}
 
 	for task, infoAny := range tasksInfo {
@@ -409,7 +425,7 @@ func parseTaskProxyAnnotation(taskProxyAny any) []taskServiceInfo {
 			if !ok {
 				continue
 			}
-			protocolAny, ok := info["protocol"]
+			protocolAny, ok := info[taskProxyProtocolKey]
 			if !ok {
 				continue
 			}
@@ -420,31 +436,16 @@ func parseTaskProxyAnnotation(taskProxyAny any) []taskServiceInfo {
 			if protocol != string(HTTP) && protocol != string(GRPC) {
 				continue
 			}
-			portIndexAny, ok := info["port_index"]
+			portIndexAny, ok := info[taskProxyPortIndexKey]
 			if !ok {
 				continue
 			}
-			var portIndex int
-			switch v := portIndexAny.(type) {
-			case int:
-				portIndex = v
-			case int64:
-				portIndex = int(v)
-			case int32:
-				portIndex = int(v)
-			case int16:
-				portIndex = int(v)
-			case int8:
-				portIndex = int(v)
-			case uint64:
-				portIndex = int(v)
-			case uint32:
-				portIndex = int(v)
-			case uint16:
-				portIndex = int(v)
-			case uint8:
-				portIndex = int(v)
-			default:
+			portIndex64, ok := parseInteger(portIndexAny)
+			if !ok {
+				continue
+			}
+			portIndex := int(portIndex64)
+			if int64(portIndex) != portIndex64 {
 				continue
 			}
 			taskServiceInfos = append(taskServiceInfos, taskServiceInfo{
@@ -456,7 +457,62 @@ func parseTaskProxyAnnotation(taskProxyAny any) []taskServiceInfo {
 		}
 	}
 
-	return taskServiceInfos
+	return taskServiceInfos, timeoutOverrides
+}
+
+func parseTaskTimeoutOverrides(taskProxy map[string]any) (TaskTimeoutOverrides, bool) {
+	var overrides TaskTimeoutOverrides
+	if value, ok := taskProxy[taskProxyRouteTimeoutSecondsKey]; ok {
+		timeout, ok := parseTimeoutSeconds(value)
+		if !ok {
+			return TaskTimeoutOverrides{}, false
+		}
+		overrides.routeTimeout = &timeout
+	}
+	if value, ok := taskProxy[taskProxyStreamIdleTimeoutKey]; ok {
+		timeout, ok := parseTimeoutSeconds(value)
+		if !ok {
+			return TaskTimeoutOverrides{}, false
+		}
+		overrides.streamIdleTimeout = &timeout
+	}
+	return overrides, true
+}
+
+func parseTimeoutSeconds(value any) (time.Duration, bool) {
+	seconds, ok := parseInteger(value)
+	if !ok || seconds < 0 || seconds > int64(math.MaxInt64/time.Second) {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
+func parseInteger(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case int16:
+		return int64(v), true
+	case int8:
+		return int64(v), true
+	case uint64:
+		if v > uint64(math.MaxInt64) {
+			return 0, false
+		}
+		return int64(v), true
+	case uint32:
+		return int64(v), true
+	case uint16:
+		return int64(v), true
+	case uint8:
+		return int64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func makeHostPortFromNode(node string) (*HostPort, error) {

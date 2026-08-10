@@ -20,12 +20,13 @@ type HostPort struct {
 }
 
 type Task struct {
-	operationID    string
-	operationAlias string
-	taskName       string
-	service        string
-	protocol       Protocol
-	jobs           []HostPort
+	operationID      string
+	operationAlias   string
+	taskName         string
+	service          string
+	protocol         Protocol
+	jobs             []HostPort
+	timeoutOverrides TaskTimeoutOverrides
 }
 
 var valueRegexp = regexp.MustCompile(`^[a-z0-9_]{1,30}$`)
@@ -54,6 +55,12 @@ func (t *Task) IDWithHostPort() string {
 	for _, job := range t.jobs {
 		sb.WriteString(job.host)
 		fmt.Fprintf(&sb, "%d", job.port)
+	}
+	if t.timeoutOverrides.routeTimeout != nil {
+		fmt.Fprintf(&sb, "route-timeout=%d", *t.timeoutOverrides.routeTimeout)
+	}
+	if t.timeoutOverrides.streamIdleTimeout != nil {
+		fmt.Fprintf(&sb, "stream-idle-timeout=%d", *t.timeoutOverrides.streamIdleTimeout)
 	}
 	return sb.String()
 }
