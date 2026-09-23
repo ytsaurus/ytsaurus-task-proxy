@@ -284,6 +284,63 @@ func TestMakeSnapshotTimeouts(t *testing.T) {
 	}
 }
 
+func TestMakeSnapshotWebSocket(t *testing.T) {
+	hashToTask := map[string]Task{
+		"ws123456": {
+			operationID:    "op123",
+			operationAlias: "myalias",
+			taskName:       "ui",
+			service:        "ws",
+			protocol:       WEBSOCKET,
+			jobs:           []HostPort{{host: "10.0.0.1", port: 8080}},
+		},
+		"http1234": {
+			operationID: "op123",
+			taskName:    "ui",
+			service:     "api",
+			protocol:    HTTP,
+			jobs:        []HostPort{{host: "10.0.0.1", port: 8081}},
+		},
+	}
+
+	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig())
+	require.NoError(t, err)
+
+	// WebSocket upstream must stay HTTP/1.1: no explicit HTTP/2 protocol options on the cluster.
+	cluster := snapshot.GetResources(resourcev3.ClusterType)["op123-ui-ws-0"].(*clusterv3.Cluster)
+	require.Empty(t, cluster.TypedExtensionProtocolOptions)
+
+	listener := onlyListener(t, snapshot.GetResources(resourcev3.ListenerType))
+	hcm := httpConnectionManager(t, listener)
+	require.Empty(t, hcm.UpgradeConfigs, "upgrade must be enabled per route, not globally")
+
+	websocketRoutes, httpRoutes := 0, 0
+	for _, vhost := range hcm.GetRouteConfig().GetVirtualHosts() {
+		for _, route := range vhost.GetRoutes() {
+			action := route.GetRoute()
+			if action == nil {
+				continue
+			}
+			switch action.GetWeightedClusters().GetClusters()[0].GetName() {
+			case "op123-ui-ws-0":
+				websocketRoutes++
+				require.Len(t, action.UpgradeConfigs, 1)
+				require.Equal(t, "websocket", action.UpgradeConfigs[0].GetUpgradeType())
+				require.True(t, action.UpgradeConfigs[0].GetEnabled().GetValue())
+			case "op123-ui-api-0":
+				httpRoutes++
+				require.Empty(t, action.UpgradeConfigs)
+			default:
+				t.Fatalf("unexpected cluster in route %v", route)
+			}
+		}
+	}
+	// domain vhost + id header + operation-id headers + alias headers
+	require.Equal(t, 4, websocketRoutes)
+	// domain vhost + id header + operation-id headers (no alias)
+	require.Equal(t, 3, httpRoutes)
+}
+
 func onlyListener(t *testing.T, resources map[string]cachetypes.Resource) *listenerv3.Listener {
 	t.Helper()
 	require.Len(t, resources, 1)

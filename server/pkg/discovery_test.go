@@ -38,6 +38,28 @@ func TestParseTaskProxyAnnotation(t *testing.T) {
 			},
 		},
 		{
+			name: "websocket protocol",
+			annotation: map[string]any{
+				"enabled": true,
+				"tasks_info": map[string]any{
+					"ui": map[string]any{
+						"ws": map[string]any{
+							"protocol":   "websocket",
+							"port_index": 1,
+						},
+					},
+				},
+			},
+			expected: []taskServiceInfo{
+				{
+					task:      "ui",
+					service:   "ws",
+					protocol:  WEBSOCKET,
+					portIndex: 1,
+				},
+			},
+		},
+		{
 			name: "minimal annotation",
 			annotation: map[string]any{
 				"enabled": true,
