@@ -12,7 +12,17 @@ type Protocol string
 const (
 	HTTP Protocol = "http"
 	GRPC Protocol = "grpc"
+	// WEBSOCKET is plain HTTP/1.1 upstream with the WebSocket upgrade enabled on the route.
+	WEBSOCKET Protocol = "websocket"
 )
+
+func ParseProtocol(value string) (Protocol, bool) {
+	switch Protocol(value) {
+	case HTTP, GRPC, WEBSOCKET:
+		return Protocol(value), true
+	}
+	return "", false
+}
 
 type HostPort struct {
 	host string
@@ -52,6 +62,7 @@ func (t *Task) OperationAlias() string {
 func (t *Task) IDWithHostPort() string {
 	sb := strings.Builder{}
 	sb.WriteString(t.ID())
+	sb.WriteString(string(t.protocol))
 	for _, job := range t.jobs {
 		sb.WriteString(job.host)
 		fmt.Fprintf(&sb, "%d", job.port)

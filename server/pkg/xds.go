@@ -39,6 +39,8 @@ import (
 const (
 	extAuthClusterName = "extAuthz"
 
+	websocketUpgradeType = "websocket"
+
 	idRouterHeaderName = "x-yt-taskproxy-id" // hash
 
 	operationIDRouterHeaderName    = "x-yt-taskproxy-operation-id"
@@ -72,7 +74,7 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 	var defaultVhostRoutes []*routev3.Route
 
 	for hash, task := range hashToTask {
-		grpc := task.protocol == "grpc"
+		grpc := task.protocol == GRPC
 		vhostName := fmt.Sprintf("%s-%s-%s", task.operationID, task.taskName, task.service)
 
 		var vhostClusters []*routev3.WeightedCluster_ClusterWeight
@@ -84,17 +86,24 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				Weight: &wrapperspb.UInt32Value{Value: 1},
 			})
 		}
-		action := &routev3.Route_Route{
-			Route: &routev3.RouteAction{
-				Timeout:     durationpb.New(task.timeoutOverrides.routeTimeoutOr(timeoutConfig.RouteTimeout)),
-				IdleTimeout: durationpb.New(task.timeoutOverrides.streamIdleTimeoutOr(timeoutConfig.StreamIdleTimeout)),
-				ClusterSpecifier: &routev3.RouteAction_WeightedClusters{
-					WeightedClusters: &routev3.WeightedCluster{
-						Clusters: vhostClusters,
-					},
+		routeAction := &routev3.RouteAction{
+			Timeout:     durationpb.New(task.timeoutOverrides.routeTimeoutOr(timeoutConfig.RouteTimeout)),
+			IdleTimeout: durationpb.New(task.timeoutOverrides.streamIdleTimeoutOr(timeoutConfig.StreamIdleTimeout)),
+			ClusterSpecifier: &routev3.RouteAction_WeightedClusters{
+				WeightedClusters: &routev3.WeightedCluster{
+					Clusters: vhostClusters,
 				},
 			},
 		}
+		if task.protocol == WEBSOCKET {
+			// Enabling the upgrade on the route is enough: Envoy allows it even when the HCM lists no upgrade_configs.
+			// The upstream stays HTTP/1.1, which is what WebSocket needs.
+			routeAction.UpgradeConfigs = []*routev3.RouteAction_UpgradeConfig{{
+				UpgradeType: websocketUpgradeType,
+				Enabled:     wrapperspb.Bool(true),
+			}}
+		}
+		action := &routev3.Route_Route{Route: routeAction}
 		domains := []string{getTaskHashDomain(hash, baseDomain)}
 		if task.operationAlias != "" {
 			domains = append(domains, getTaskAliasDomain(task, baseDomain))

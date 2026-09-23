@@ -37,7 +37,7 @@ To publish services from a regular YTsaurus operation, add the `task_proxy` anno
 }>
 ```
 
-`protocol` must be `http` or `grpc`. If `tasks_info` is omitted, task-proxy publishes every job port as an HTTP service named `port<N>`.
+`protocol` must be `http`, `grpc`, or `websocket`. A `websocket` service is proxied like `http`, but Envoy additionally accepts the `Upgrade: websocket` handshake on its routes; after the upgrade the connection is tunneled to the job. Note that `stream_idle_timeout_seconds` still applies to an idle WebSocket connection, so raise it or set it to `0` for connections that stay silent for a long time. If `tasks_info` is omitted, task-proxy publishes every job port as an HTTP service named `port<N>`.
 
 The annotation can also override request timeouts for every service in that operation:
 

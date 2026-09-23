@@ -429,11 +429,12 @@ func parseTaskProxyAnnotation(taskProxyAny any) ([]taskServiceInfo, TaskTimeoutO
 			if !ok {
 				continue
 			}
-			protocol, ok := protocolAny.(string)
+			protocolString, ok := protocolAny.(string)
 			if !ok {
 				continue
 			}
-			if protocol != string(HTTP) && protocol != string(GRPC) {
+			protocol, ok := ParseProtocol(protocolString)
+			if !ok {
 				continue
 			}
 			portIndexAny, ok := info[taskProxyPortIndexKey]
@@ -451,7 +452,7 @@ func parseTaskProxyAnnotation(taskProxyAny any) ([]taskServiceInfo, TaskTimeoutO
 			taskServiceInfos = append(taskServiceInfos, taskServiceInfo{
 				task:      task,
 				service:   service,
-				protocol:  Protocol(protocol),
+				protocol:  protocol,
 				portIndex: portIndex,
 			})
 		}

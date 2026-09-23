@@ -78,6 +78,24 @@ func TestValidateTask(t *testing.T) {
 	}
 }
 
+func TestTaskIDWithHostPortIncludesProtocol(t *testing.T) {
+	http := Task{operationID: "op", taskName: "task", service: "service", protocol: HTTP}
+	websocket := http
+	websocket.protocol = WEBSOCKET
+
+	assert.NotEqual(t, http.IDWithHostPort(), websocket.IDWithHostPort())
+}
+
+func TestParseProtocol(t *testing.T) {
+	for _, value := range []string{"http", "grpc", "websocket"} {
+		protocol, ok := ParseProtocol(value)
+		assert.True(t, ok)
+		assert.Equal(t, Protocol(value), protocol)
+	}
+	_, ok := ParseProtocol("dns")
+	assert.False(t, ok)
+}
+
 func TestTaskIDWithHostPortIncludesTimeoutOverrides(t *testing.T) {
 	withoutOverrides := Task{operationID: "op", taskName: "task", service: "service"}
 	withOverride := withoutOverrides
