@@ -234,6 +234,8 @@ listener:
               match:
                 prefix: /
         statPrefix: ingress_http
+        upgradeConfigs:
+        - upgradeType: websocket
   name: listener_0
 `
 
