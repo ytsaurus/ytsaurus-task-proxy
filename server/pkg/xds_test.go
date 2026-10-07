@@ -8,6 +8,8 @@ import (
 
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	accesslogfile3 "github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/file/v3"
+	accesslogstream3 "github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/stream/v3"
 	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	cachetypes "github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -32,7 +34,7 @@ func TestMakeSnapshot(t *testing.T) {
 		},
 	}
 
-	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig())
+	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig(), DefaultLoggingConfig().AccessLog, "")
 	require.NoError(t, err)
 
 	// Convert snapshot to a structured map for YAML comparison
@@ -264,7 +266,7 @@ func TestMakeSnapshotTimeouts(t *testing.T) {
 		StreamIdleTimeout: 5 * time.Minute,
 	}
 
-	snapshot, err := makeSnapshot(map[string]Task{"abc12345": task}, "v1", "example.com", false, false, config)
+	snapshot, err := makeSnapshot(map[string]Task{"abc12345": task}, "v1", "example.com", false, false, config, DefaultLoggingConfig().AccessLog, "")
 	require.NoError(t, err)
 
 	cluster := snapshot.GetResources(resourcev3.ClusterType)["op123-worker-api-0"].(*clusterv3.Cluster)
@@ -303,7 +305,7 @@ func TestMakeSnapshotWebSocket(t *testing.T) {
 		},
 	}
 
-	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig())
+	snapshot, err := makeSnapshot(hashToTask, "v1", "example.com", false, true, DefaultTaskProxyTimeoutConfig(), DefaultLoggingConfig().AccessLog, "")
 	require.NoError(t, err)
 
 	// WebSocket upstream must stay HTTP/1.1: no explicit HTTP/2 protocol options on the cluster.
@@ -356,4 +358,48 @@ func httpConnectionManager(t *testing.T, listener *listenerv3.Listener) *hcmv3.H
 	err := listener.GetFilterChains()[0].GetFilters()[0].GetTypedConfig().UnmarshalTo(&hcm)
 	require.NoError(t, err)
 	return &hcm
+}
+
+func TestMakeSnapshotAccessLogging(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		config   AccessLogConfig
+		wantName string
+		wantType string
+	}{
+		{"stdout", AccessLogConfig{Enabled: true, WriterType: "stdout"}, "envoy.access_loggers.stdout", "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog"},
+		{"stderr", AccessLogConfig{Enabled: true, WriterType: "stderr"}, "envoy.access_loggers.stderr", "type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StderrAccessLog"},
+		{"file", AccessLogConfig{Enabled: true, WriterType: "file"}, "envoy.access_loggers.file", "type.googleapis.com/envoy.extensions.access_loggers.file.v3.FileAccessLog"},
+		{"disabled", AccessLogConfig{Enabled: false, WriterType: "stderr"}, "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, err := makeSnapshot(nil, "v1", "example.com", false, false, DefaultTaskProxyTimeoutConfig(), tc.config, "/tmp/task-proxy-custom/access.log")
+			require.NoError(t, err)
+			listener := onlyListener(t, snapshot.GetResources(resourcev3.ListenerType))
+			require.Empty(t, httpConnectionManager(t, listener).AccessLog, "access logging stays at listener level")
+			if !tc.config.Enabled {
+				require.Empty(t, listener.AccessLog)
+				return
+			}
+			require.Len(t, listener.AccessLog, 1)
+			access := listener.AccessLog[0]
+			require.Equal(t, tc.wantName, access.Name)
+			require.Equal(t, tc.wantType, access.GetTypedConfig().TypeUrl)
+			switch tc.config.WriterType {
+			case "file":
+				var file accesslogfile3.FileAccessLog
+				require.NoError(t, access.GetTypedConfig().UnmarshalTo(&file))
+				require.Equal(t, "/tmp/task-proxy-custom/access.log", file.Path)
+				require.Nil(t, file.AccessLogFormat, "preserve default access format")
+			case "stdout":
+				var stream accesslogstream3.StdoutAccessLog
+				require.NoError(t, access.GetTypedConfig().UnmarshalTo(&stream))
+				require.Nil(t, stream.AccessLogFormat)
+			case "stderr":
+				var stream accesslogstream3.StderrAccessLog
+				require.NoError(t, access.GetTypedConfig().UnmarshalTo(&stream))
+				require.Nil(t, stream.AccessLogFormat)
+			}
+		})
+	}
 }

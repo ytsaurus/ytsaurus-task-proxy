@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -19,21 +18,6 @@ const (
 	ytHTTPClientRetryCount    = 4
 	ytHTTPClientReplayBodyMax = 1 << 20 // 1 MiB
 )
-
-type SimpleLogger struct{}
-
-func (SimpleLogger) Debugf(format string, args ...any) {
-	log.Printf("DEBUG: "+format, args...)
-}
-func (SimpleLogger) Infof(format string, args ...any) {
-	log.Printf("INFO:  "+format, args...)
-}
-func (SimpleLogger) Warnf(format string, args ...any) {
-	log.Printf("WARN:  "+format, args...)
-}
-func (SimpleLogger) Errorf(format string, args ...any) {
-	log.Printf("ERROR: "+format, args...)
-}
 
 func CreateYTClient(proxy string, credentials ytsdk.Credentials, logger *SimpleLogger) (ytsdk.Client, error) {
 	timeout := time.Second * 10

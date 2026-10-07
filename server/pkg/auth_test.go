@@ -1,11 +1,29 @@
 package pkg
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAuthRejectsMissingCredentialsWithoutLoggingHeaders(t *testing.T) {
+	var output bytes.Buffer
+	logger := &SimpleLogger{state: &logState{writer: &output}}
+	server := CreateAuthServer(nil, "", logger, "auth", AuthCacheConfig{})
+	allowed, err := server.checkOperationPermission(context.Background(), "op", map[string]string{
+		"authorization": "unsupported private-token",
+		"cookie":        "private-cookie=private-value",
+	})
+	require.NoError(t, err)
+	require.False(t, allowed)
+	require.Contains(t, output.String(), "without credentials")
+	require.NotContains(t, output.String(), "private-token")
+	require.NotContains(t, output.String(), "private-cookie")
+	require.NotContains(t, output.String(), "private-value")
+}
 
 func TestFindTaskByRequest(t *testing.T) {
 	// Setup test data
