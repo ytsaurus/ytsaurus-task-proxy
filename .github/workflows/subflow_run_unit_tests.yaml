@@ -29,7 +29,19 @@ jobs:
         with:
           go-version-file: 'server/go.mod'
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4.3.1
+        with:
+          version: v3.17.3
+
       - name: Run unit tests
         shell: bash
         run: |
           make test
+
+      - name: Lint Helm chart
+        run: helm lint chart
+
+      - name: Run real Envoy logging integration
+        if: matrix.name == 'ubuntu'
+        run: make test-integration

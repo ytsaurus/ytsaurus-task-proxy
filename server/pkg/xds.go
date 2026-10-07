@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"sort"
 	"time"
@@ -19,6 +18,7 @@ import (
 	endpointv3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
 	routev3 "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	accesslogfile3 "github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/file/v3"
 	accesslogstream3 "github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/stream/v3"
 	extauthzv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_authz/v3"
 	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
@@ -49,7 +49,7 @@ const (
 	serviceRouteHeaderName         = "x-yt-taskproxy-service"
 )
 
-func ServeGRPC(s serverv3.Server, authServer *authServer) error {
+func ServeGRPC(s serverv3.Server, authServer *authServer, logger ...*SimpleLogger) error {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", serverPort))
 	if err != nil {
 		return err
@@ -62,12 +62,16 @@ func ServeGRPC(s serverv3.Server, authServer *authServer) error {
 
 	authv3.RegisterAuthorizationServer(gs, authServer)
 
-	log.Printf("xDS + extAuthz starts listening on :%d", serverPort)
+	startupLogger := &SimpleLogger{}
+	if len(logger) > 0 && logger[0] != nil {
+		startupLogger = logger[0]
+	}
+	startupLogger.Infof("xDS + extAuthz starts listening on :%d", serverPort)
 
 	return gs.Serve(lis)
 }
 
-func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string, tls bool, authEnabled bool, timeoutConfig TaskProxyTimeoutConfig) (*cachev3.Snapshot, error) {
+func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string, tls bool, authEnabled bool, timeoutConfig TaskProxyTimeoutConfig, accessLogConfig AccessLogConfig, accessLogPath string) (*cachev3.Snapshot, error) {
 	var clusters []cachetypes.Resource
 	var vhosts []*routev3.VirtualHost
 
@@ -264,22 +268,23 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 			}},
 			TransportSocket: transportSocket,
 		}},
-		AccessLog: []*accesslog3.AccessLog{
-			{
-				Name: "envoy.access_loggers.stderr",
-				ConfigType: &accesslog3.AccessLog_TypedConfig{
-					TypedConfig: mustAny(&accesslogstream3.StderrAccessLog{
-						/* AccessLogFormat: &accesslogstream3.StderrAccessLog_LogFormat{
-							LogFormat: &corev3.SubstitutionFormatString{
-								Format: &corev3.SubstitutionFormatString_TextFormat{
-									TextFormat: "%LOCAL_REPLY_BODY%:%RESPONSE_CODE%:path=%REQ(:path)%\n",
-								},
-							},
-						}, */
-					}),
-				},
-			},
-		},
+	}
+	if accessLogConfig.Enabled {
+		var sink proto.Message
+		switch accessLogConfig.WriterType {
+		case "stdout":
+			sink = &accesslogstream3.StdoutAccessLog{}
+		case "stderr":
+			sink = &accesslogstream3.StderrAccessLog{}
+		case "file":
+			sink = &accesslogfile3.FileAccessLog{Path: accessLogPath}
+		default:
+			return nil, fmt.Errorf("invalid access log writerType %q", accessLogConfig.WriterType)
+		}
+		listener.AccessLog = []*accesslog3.AccessLog{{
+			Name:       "envoy.access_loggers." + accessLogConfig.WriterType,
+			ConfigType: &accesslog3.AccessLog_TypedConfig{TypedConfig: mustAny(sink)},
+		}}
 	}
 
 	snap, err := cachev3.NewSnapshot(version, map[resourcev3.Type][]cachetypes.Resource{

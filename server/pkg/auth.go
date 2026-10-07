@@ -133,7 +133,7 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
-		s.logger.Warnf("request without credentials, headers: %v", headers)
+		s.logger.Warnf("request without credentials")
 		defaultMetrics.ObserveAuthFailure(authReasonCredentials, nil)
 		return false, nil
 	}
