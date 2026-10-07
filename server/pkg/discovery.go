@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net"
@@ -33,6 +34,9 @@ type taskDiscovery struct {
 	yt         ytsdk.Client
 
 	logger *SimpleLogger
+
+	// Last successful discovery per operation, replaced only after a complete pass.
+	operationTasks map[ytsdk.OperationID]TaskList
 }
 
 func CreateTaskDiscovery(baseDomain string, dirPath string, yt ytsdk.Client, logger *SimpleLogger) *taskDiscovery {
@@ -45,9 +49,15 @@ func CreateTaskDiscovery(baseDomain string, dirPath string, yt ytsdk.Client, log
 	}
 }
 
-func (d *taskDiscovery) Discovery(ctx context.Context) (TaskList, error) {
-	var tasks []Task
+// ytReqError distinguishes failed YT reads from invalid discovery data.
+type ytReqError struct {
+	err error
+}
 
+func (e *ytReqError) Error() string { return e.err.Error() }
+func (e *ytReqError) Unwrap() error { return e.err }
+
+func (d *taskDiscovery) Discovery(ctx context.Context) (TaskList, error) {
 	// TODO: listing all running operations is inefficient
 	// Later we will make separate task proxy spec in operations and will request only for operations with it.
 	operations, err := d.listOperations(ctx)
@@ -57,32 +67,45 @@ func (d *taskDiscovery) Discovery(ctx context.Context) (TaskList, error) {
 
 	d.logger.Debugf("found %d running operations", len(operations))
 
+	var tasks TaskList
+	nextOperationTasks := make(map[ytsdk.OperationID]TaskList, len(operations))
 	for _, op := range operations {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		title := parseOperationTitle(op)
 		annotations := op.RuntimeParameters.Annotations
 
 		var opTasks []Task
+		var opErr error
+		var source string
 		if strings.HasPrefix(title, "Spark driver for") {
-			opTasks, err = processSPYTDirectSubmitOperation(op)
-			if err != nil {
-				d.logger.Errorf("unable to process SPYT direct submit operation %q: %v", op.ID, err)
-				continue
-			}
+			source = "SPYT direct submit"
+			opTasks, opErr = processSPYTDirectSubmitOperation(op)
 		} else if annotations["is_spark"] == true {
-			opTasks, err = d.processSPYTStandaloneClusterOperation(ctx, op)
-			if err != nil {
-				d.logger.Errorf("unable to process SPYT standalone cluster operation %q: %v", op.ID, err)
-				continue
-			}
+			source = "SPYT standalone cluster"
+			opTasks, opErr = d.processSPYTStandaloneClusterOperation(ctx, op)
 		} else if _, ok := annotations[taskProxyAnnotationKey]; ok {
-			opTasks, err = d.processTaskProxyAnnotatedOperation(ctx, op)
-			if err != nil {
-				d.logger.Errorf("unable to process task proxy annotated operation %q: %v", op.ID, err)
+			source = "task proxy annotated"
+			opTasks, opErr = d.processTaskProxyAnnotatedOperation(ctx, op)
+		}
+		if opErr != nil {
+			d.logger.Errorf("unable to process %s operation %q: %v", source, op.ID, opErr)
+			var readErr *ytReqError
+			if !errors.As(opErr, &readErr) {
 				continue
 			}
+			// Discard this operation's partial result, retaining the entire old one.
+			opTasks = d.operationTasks[op.ID]
+			d.logger.Warnf("reusing %d previously discovered tasks for operation %q after YT read failure: %v", len(opTasks), op.ID, readErr)
 		}
+		nextOperationTasks[op.ID] = opTasks
 		tasks = append(tasks, opTasks...)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	d.operationTasks = nextOperationTasks
 	return tasks, nil
 }
 
@@ -181,7 +204,7 @@ func (d *taskDiscovery) processSPYTStandaloneClusterOperation(ctx context.Contex
 				// history server is optionally enabled in spark conf
 				continue
 			}
-			return nil, fmt.Errorf("failed to list nodes in discovery path for task %q: %v", t.taskName, err)
+			return nil, &ytReqError{err: fmt.Errorf("failed to list nodes in discovery path for task %q: %w", t.taskName, err)}
 		}
 
 		var jobs []HostPort
@@ -219,7 +242,7 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 	defaultMetrics.ObserveYTDuration("list_jobs", time.Since(listJobsStarted))
 	if err != nil {
 		defaultMetrics.ObserveYTError("list_jobs", err)
-		return nil, fmt.Errorf("failed to list jobs: %v", err)
+		return nil, &ytReqError{err: fmt.Errorf("failed to list jobs: %w", err)}
 	}
 
 	idToTask := make(map[string]*Task)
@@ -242,7 +265,7 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 		defaultMetrics.ObserveYTDuration("get_node", time.Since(getNodeStarted))
 		if err != nil {
 			defaultMetrics.ObserveYTError("get_node", err)
-			return nil, fmt.Errorf("failed to list job %q ports: %v", job.ID, err)
+			return nil, &ytReqError{err: fmt.Errorf("failed to list job %q ports: %w", job.ID, err)}
 		}
 		for i, port := range jobPorts {
 			var serviceInfo *taskServiceInfo
@@ -359,18 +382,28 @@ func (d *taskDiscovery) listOperations(ctx context.Context) ([]ytsdk.OperationSt
 			Cursor:          cursor,
 			CursorDirection: &cursorDirection,
 			Limit:           &limit,
-			Attributes:      []string{"id", "runtime_parameters", "brief_spec"},
+			Attributes:      []string{"id", "runtime_parameters", "brief_spec", "start_time"},
 		})
 		defaultMetrics.ObserveYTDuration("list_operations", time.Since(listOperationsStarted))
 		if err != nil {
 			defaultMetrics.ObserveYTError("list_operations", err)
 			return nil, err
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		operations = append(operations, resp.Operations...)
-		if len(resp.Operations) < limit {
+		if !resp.Incomplete {
 			break
 		}
-		cursor = &operations[len(operations)-1].StartTime
+		if len(resp.Operations) == 0 {
+			return nil, fmt.Errorf("incomplete running operation listing returned an empty page")
+		}
+		nextCursor := resp.Operations[len(resp.Operations)-1].StartTime
+		if time.Time(nextCursor).IsZero() || (cursor != nil && !time.Time(nextCursor).Before(time.Time(*cursor))) {
+			return nil, fmt.Errorf("incomplete running operation listing did not advance cursor: %v -> %v", cursor, nextCursor)
+		}
+		cursor = &nextCursor
 	}
 
 	return operations, nil
