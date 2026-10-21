@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"flag"
-	"log"
+	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
@@ -18,10 +20,14 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
+	os.Exit(run())
+}
+
+func run() int {
 	defaultTimeoutConfig := pkg.DefaultTaskProxyTimeoutConfig()
 
 	var args struct {
+		loggingConfigPath        string
 		ytProxy                  string
 		ytTokenPath              string
 		baseDomain               string
@@ -38,6 +44,7 @@ func main() {
 		routeTimeoutSeconds      int
 		streamIdleTimeoutSeconds int
 	}
+	flag.StringVar(&args.loggingConfigPath, "logging-config", "", "logging configuration YAML path (empty uses defaults)")
 	flag.StringVar(&args.ytProxy, "yt-proxy", "", "YT proxy host")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
 	flag.StringVar(&args.baseDomain, "base-domain", "", "base domain for jobs")
@@ -55,44 +62,76 @@ func main() {
 	flag.IntVar(&args.streamIdleTimeoutSeconds, "stream-idle-timeout-seconds", int(defaultTimeoutConfig.StreamIdleTimeout/time.Second), "maximum idle time in seconds for an upstream request or response stream (0 disables the timeout)")
 	flag.Parse()
 
+	loggingConfig, err := pkg.LoadLoggingConfig(args.loggingConfigPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load logging configuration: %v\n", err)
+		return 1
+	}
+	logging, err := pkg.NewLogging(loggingConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logging: %v\n", err)
+		return 1
+	}
+	defer func() {
+		if err := logging.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to close logging: %v\n", err)
+		}
+	}()
+	logger := logging.Logger()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	go logging.Run(ctx)
+
 	if args.ytProxy == "" {
-		log.Fatal("'yt-proxy' argument is required")
+		logger.Errorf("'yt-proxy' argument is required")
+		return 1
 	}
 	if args.ytTokenPath == "" {
-		log.Fatal("'yt-token-path' argument is required")
+		logger.Errorf("'yt-token-path' argument is required")
+		return 1
 	}
 	if args.baseDomain == "" {
-		log.Fatal("'base-domain' argument is required")
+		logger.Errorf("'base-domain' argument is required")
+		return 1
 	}
 	if args.dirPath == "" {
-		log.Fatal("'dir-path' argument is required")
+		logger.Errorf("'dir-path' argument is required")
+		return 1
 	}
 	if args.discoveryPeriodSeconds < 1 || args.discoveryPeriodSeconds > 24*60*60 {
-		log.Fatal("'discovery-period-seconds' argument must be positive and not greater than 24 hours")
+		logger.Errorf("'discovery-period-seconds' argument must be positive and not greater than 24 hours")
+		return 1
 	}
 	if args.authCacheTTLSeconds < 0 {
-		log.Fatal("'auth-cache-ttl-seconds' argument must be non-negative")
+		logger.Errorf("'auth-cache-ttl-seconds' argument must be non-negative")
+		return 1
 	}
 	if args.authCacheCapacity < 0 {
-		log.Fatal("'auth-cache-capacity' argument must be non-negative")
+		logger.Errorf("'auth-cache-capacity' argument must be non-negative")
+		return 1
 	}
 	if args.authCacheMaxConcurrency < 0 {
-		log.Fatal("'auth-cache-max-concurrent-backend-requests' argument must be non-negative")
+		logger.Errorf("'auth-cache-max-concurrent-backend-requests' argument must be non-negative")
+		return 1
 	}
 	if args.authCacheRefreshBefore < 0 {
-		log.Fatal("'auth-cache-refresh-before-seconds' argument must be non-negative")
+		logger.Errorf("'auth-cache-refresh-before-seconds' argument must be non-negative")
+		return 1
 	}
 	connectTimeout, err := pkg.DurationFromSeconds(args.connectTimeoutSeconds)
 	if err != nil {
-		log.Fatalf("invalid connect timeout: %v", err)
+		logger.Errorf("invalid connect timeout: %v", err)
+		return 1
 	}
 	routeTimeout, err := pkg.DurationFromSeconds(args.routeTimeoutSeconds)
 	if err != nil {
-		log.Fatalf("invalid route timeout: %v", err)
+		logger.Errorf("invalid route timeout: %v", err)
+		return 1
 	}
 	streamIdleTimeout, err := pkg.DurationFromSeconds(args.streamIdleTimeoutSeconds)
 	if err != nil {
-		log.Fatalf("invalid stream idle timeout: %v", err)
+		logger.Errorf("invalid stream idle timeout: %v", err)
+		return 1
 	}
 	timeoutConfig := pkg.TaskProxyTimeoutConfig{
 		ConnectTimeout:    connectTimeout,
@@ -100,21 +139,22 @@ func main() {
 		StreamIdleTimeout: streamIdleTimeout,
 	}
 	if err := timeoutConfig.Validate(); err != nil {
-		log.Fatalf("invalid task proxy timeout configuration: %v", err)
+		logger.Errorf("invalid task proxy timeout configuration: %v", err)
+		return 1
 	}
 
 	ytTokenBytes, err := os.ReadFile(args.ytTokenPath)
 	if err != nil {
-		log.Fatalf("failed to read YT token: %v", err)
+		logger.Errorf("failed to read YT token: %v", err)
+		return 1
 	}
 	ytToken := strings.TrimSpace(string(ytTokenBytes))
 
-	logger := pkg.SimpleLogger{}
-
-	ytClient, err := pkg.CreateYTClient(args.ytProxy, &ytsdk.TokenCredentials{Token: ytToken}, &logger)
+	ytClient, err := pkg.CreateYTClient(args.ytProxy, &ytsdk.TokenCredentials{Token: ytToken}, logger)
 	if err != nil {
 		pkg.DefaultMetrics().ObserveYTError("create_client", err)
-		log.Fatalf("failed to create YT client: %v", err)
+		logger.Errorf("failed to create YT client: %v", err)
+		return 1
 	}
 
 	tls := false
@@ -126,9 +166,9 @@ func main() {
 
 	cache := cachev3.NewSnapshotCache(true, cachev3.IDHash{}, logger)
 
-	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
+	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, logger)
 
-	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
+	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, logger, args.authCookieName, pkg.AuthCacheConfig{
 		Enabled:                      args.authCacheEnabled,
 		TTLSeconds:                   args.authCacheTTLSeconds,
 		Capacity:                     args.authCacheCapacity,
@@ -136,11 +176,12 @@ func main() {
 		RefreshBeforeSeconds:         args.authCacheRefreshBefore,
 	})
 
-	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, timeoutConfig, authServer, taskDiscovery, cache)
+	taskUpdater := pkg.CreateTaskUpdater(args.baseDomain, tls, args.authEnabled, timeoutConfig, loggingConfig.AccessLog, loggingConfig.AccessLogPath(), authServer, taskDiscovery, cache)
 
+	serveErrors := make(chan error, 2)
 	go func() {
-		if err := pkg.ServeMetrics(pkg.DefaultGatherer()); err != nil {
-			log.Fatalf("failed to serve metrics: %v", err)
+		if err := pkg.ServeMetrics(pkg.DefaultGatherer(), logger); err != nil {
+			serveErrors <- fmt.Errorf("failed to serve metrics: %w", err)
 		}
 	}()
 
@@ -148,11 +189,18 @@ func main() {
 		var version string
 		discoveryPeriod := time.Duration(args.discoveryPeriodSeconds) * time.Second
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			tasks, err := taskDiscovery.Discovery(ctx)
 			if err != nil {
 				pkg.DefaultMetrics().ObserveDiscoveryFailure("discovery", err)
 				logger.Errorf("failed to discover tasks: %v", err)
-				time.Sleep(discoveryPeriod)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(discoveryPeriod):
+				}
 				continue // preserve old version of table, err is probably transient
 			}
 
@@ -186,10 +234,24 @@ func main() {
 				}
 			}
 
-			time.Sleep(discoveryPeriod)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(discoveryPeriod):
+			}
 		}
 	}()
-	if err := pkg.ServeGRPC(serverv3.NewServer(ctx, cache, nil), authServer); err != nil {
-		log.Fatalf("failed to serve gRPC: %v", err)
+	go func() {
+		if err := pkg.ServeGRPC(serverv3.NewServer(ctx, cache, nil), authServer, logger); err != nil {
+			serveErrors <- fmt.Errorf("failed to serve gRPC: %w", err)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		logger.Infof("task proxy stopping")
+		return 0
+	case err := <-serveErrors:
+		logger.Errorf("%v", err)
+		return 1
 	}
 }

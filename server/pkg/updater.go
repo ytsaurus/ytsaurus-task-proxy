@@ -12,10 +12,12 @@ type snapshotSetter interface {
 }
 
 type taskUpdater struct {
-	baseDomain    string
-	tls           bool
-	authEnabled   bool
-	timeoutConfig TaskProxyTimeoutConfig
+	baseDomain      string
+	tls             bool
+	authEnabled     bool
+	timeoutConfig   TaskProxyTimeoutConfig
+	accessLogConfig AccessLogConfig
+	accessLogPath   string
 
 	authServer    *authServer
 	taskDiscovery *taskDiscovery
@@ -27,18 +29,22 @@ func CreateTaskUpdater(
 	tls bool,
 	authEnabled bool,
 	timeoutConfig TaskProxyTimeoutConfig,
+	accessLogConfig AccessLogConfig,
+	accessLogPath string,
 	authServer *authServer,
 	taskDiscovery *taskDiscovery,
 	cache snapshotSetter,
 ) *taskUpdater {
 	return &taskUpdater{
-		baseDomain:    baseDomain,
-		tls:           tls,
-		authEnabled:   authEnabled,
-		timeoutConfig: timeoutConfig,
-		authServer:    authServer,
-		taskDiscovery: taskDiscovery,
-		cache:         cache,
+		baseDomain:      baseDomain,
+		tls:             tls,
+		authEnabled:     authEnabled,
+		timeoutConfig:   timeoutConfig,
+		accessLogConfig: accessLogConfig,
+		accessLogPath:   accessLogPath,
+		authServer:      authServer,
+		taskDiscovery:   taskDiscovery,
+		cache:           cache,
 	}
 }
 
@@ -48,7 +54,7 @@ func (u *taskUpdater) Update(
 	operationAliasToID map[string]string,
 	version string,
 ) error {
-	snapshot, err := makeSnapshot(hashToTask, version, u.baseDomain, u.tls, u.authEnabled, u.timeoutConfig)
+	snapshot, err := makeSnapshot(hashToTask, version, u.baseDomain, u.tls, u.authEnabled, u.timeoutConfig, u.accessLogConfig, u.accessLogPath)
 	if err != nil {
 		return fmt.Errorf("failed to make snapshot: %v", err)
 	}

@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "object",
+      "properties": {
+        "logging": {
+          "$ref": "#/definitions/logging"
+        }
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "properties": {
+        "logging": {
+          "$ref": "#/definitions/logging"
+        },
+        "accessLog": {
+          "$ref": "#/definitions/accessLog"
+        }
+      }
+    },
+    "persistence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "size",
+        "accessModes"
+      ],
+      "properties": {
+        "storageClass": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "size": {
+          "type": "string",
+          "minLength": 1
+        },
+        "accessModes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "ReadWriteOnce",
+              "ReadWriteMany",
+              "ReadWriteOncePod"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "logging": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writerType",
+        "minLogLevel"
+      ],
+      "properties": {
+        "writerType": {
+          "enum": [
+            "stdout",
+            "stderr",
+            "file"
+          ]
+        },
+        "minLogLevel": {
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "rotationPolicy": {
+          "$ref": "#/definitions/rotationPolicy"
+        }
+      }
+    },
+    "accessLog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "writerType"
+      ],
+      "properties": {
+        "writerType": {
+          "enum": [
+            "stdout",
+            "stderr",
+            "file"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "rotationPolicy": {
+          "$ref": "#/definitions/rotationPolicy"
+        }
+      }
+    },
+    "rotationPolicy": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rotationPeriodMilliseconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854
+        },
+        "maxSegmentSize": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            {
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?)([KMGTPE]i?B?|B)?$",
+              "not": {
+                "pattern": "^0+(\\.0+)?([KMGTPE]i?B?|B)?$"
+              }
+            }
+          ]
+        },
+        "maxTotalSizeToKeep": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9223372036854775807
+            },
+            {
+              "type": "string",
+              "pattern": "^([0-9]+(\\.[0-9]+)?)([KMGTPE]i?B?|B)?$",
+              "not": {
+                "pattern": "^0+(\\.0+)?([KMGTPE]i?B?|B)?$"
+              }
+            }
+          ]
+        },
+        "maxSegmentCountToKeep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9223372036854775807
+        }
+      },
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "maxProperties": 0
+        },
+        {
+          "allOf": [
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "rotationPeriodMilliseconds"
+                  ]
+                },
+                {
+                  "required": [
+                    "maxSegmentSize"
+                  ]
+                }
+              ]
+            },
+            {
+              "anyOf": [
+                {
+                  "required": [
+                    "maxSegmentCountToKeep"
+                  ]
+                },
+                {
+                  "required": [
+                    "maxTotalSizeToKeep"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

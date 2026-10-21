@@ -18,7 +18,7 @@ CHART_PACKAGE := task-proxy-chart-$(RELEASE_VERSION).tgz
 .PHONY: test
 test:
 	@echo "🧪 Running tests..."
-	cd server/pkg && go test ./... -v
+	cd server && go test ./... -v
 
 .PHONY: build
 build:
@@ -62,3 +62,12 @@ clean:
 	@echo "✅ Cleanup completed"
 
 .DEFAULT_GOAL := helm-chart
+
+.PHONY: test-chart
+test-chart:
+	helm lint chart
+	cd server && go test ./chart -count=1 -v
+
+.PHONY: test-integration
+test-integration:
+	cd server && go test -tags=integration ./pkg -run TestEnvoyLoggingIntegration -count=1 -v -timeout=180s

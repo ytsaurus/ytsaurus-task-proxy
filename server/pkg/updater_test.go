@@ -8,6 +8,7 @@ import (
 	"time"
 
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	accesslogfile3 "github.com/envoyproxy/go-control-plane/envoy/extensions/access_loggers/file/v3"
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,38 @@ import (
 type failingSnapshotSetter struct {
 	calls int
 	err   error
+}
+
+type capturingSnapshotSetter struct{ snapshot cachev3.ResourceSnapshot }
+
+func (s *capturingSnapshotSetter) SetSnapshot(_ context.Context, _ string, snapshot cachev3.ResourceSnapshot) error {
+	s.snapshot = snapshot
+	// Stop before the unrelated YT table write; the real updater already built the xDS payload.
+	return errors.New("snapshot captured")
+}
+
+func TestUpdaterPropagatesAccessLogging(t *testing.T) {
+	for _, config := range []AccessLogConfig{
+		{Enabled: true, WriterType: "file"},
+		{Enabled: false, WriterType: "stderr"},
+	} {
+		t.Run(config.WriterType, func(t *testing.T) {
+			cache := &capturingSnapshotSetter{}
+			updater := CreateTaskUpdater("example.com", false, false, DefaultTaskProxyTimeoutConfig(), config, "/tmp/updater-logs/access.log", nil, nil, cache)
+			err := updater.Update(context.Background(), nil, nil, "v1")
+			require.ErrorContains(t, err, "snapshot captured")
+			require.NotNil(t, cache.snapshot)
+			listener := onlyListener(t, cache.snapshot.GetResources(resourcev3.ListenerType))
+			if !config.Enabled {
+				require.Empty(t, listener.AccessLog)
+				return
+			}
+			require.Len(t, listener.AccessLog, 1)
+			var file accesslogfile3.FileAccessLog
+			require.NoError(t, listener.AccessLog[0].GetTypedConfig().UnmarshalTo(&file))
+			require.Equal(t, "/tmp/updater-logs/access.log", file.Path)
+		})
+	}
 }
 
 func (s *failingSnapshotSetter) SetSnapshot(_ context.Context, _ string, _ cachev3.ResourceSnapshot) error {
@@ -40,7 +73,7 @@ func TestUpdateDoesNotChangeAuthDataIfSetSnapshotFails(t *testing.T) {
 	)
 
 	cache := &failingSnapshotSetter{err: errors.New("set snapshot failed")}
-	updater := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), authServer, &taskDiscovery{}, cache)
+	updater := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), DefaultLoggingConfig().AccessLog, "", authServer, &taskDiscovery{}, cache)
 
 	newTask := Task{
 		operationID: "op-new",
@@ -117,7 +150,8 @@ func TestDiscoveryRetainedAndFreshTasksReachAllUpdaterOutputs(t *testing.T) {
 	}
 	auth := CreateAuthServer(nil, "", &SimpleLogger{}, "", AuthCacheConfig{})
 	cache := cachev3.NewSnapshotCache(true, cachev3.IDHash{}, &SimpleLogger{})
-	u := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), auth, d, cache)
+	loggingConfig := DefaultLoggingConfig()
+	u := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), loggingConfig.AccessLog, loggingConfig.AccessLogPath(), auth, d, cache)
 	require.NoError(t, u.Update(context.Background(), hashToTask, aliases, "merged"))
 
 	// Hashes below are fixed SHA256 suffixes of the fixture IDs, independent of output.

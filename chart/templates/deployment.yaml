@@ -1,22 +1,55 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
 spec:
+  serviceName: {{ .Release.Name }}-headless
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  volumeClaimTemplates:
+  - metadata:
+      name: logs
+    spec:
+      accessModes: {{ toJson .Values.persistence.accessModes }}
+      {{- if ne .Values.persistence.storageClass nil }}
+      storageClassName: {{ .Values.persistence.storageClass | quote }}
+      {{- end }}
+      resources:
+        requests:
+          storage: {{ .Values.persistence.size | quote }}
   replicas: {{ .Values.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/component: task-proxy
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
         app.kubernetes.io/component: task-proxy
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/config.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: envoy
         image: {{ .Values.proxy.image.repository }}{{ if .Values.proxy.image.tag }}:{{ .Values.proxy.image.tag }}{{ end }}
-        args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "edge-proxy"]
+        args:
+        - "-c"
+        - "/etc/envoy/envoy.yaml"
+        - "--service-cluster"
+        - "edge-proxy"
+        - "--log-level"
+        - {{ .Values.proxy.logging.minLogLevel | quote }}
+        {{- if ne .Values.proxy.logging.writerType "stderr" }}
+        - "--log-path"
+        - {{ if eq .Values.proxy.logging.writerType "stdout" }}"/dev/stdout"{{ else }}"/var/log/task-proxy/envoy.log"{{ end }}
+        {{- end }}
         ports:
         - name: http
           containerPort: 8080
@@ -37,6 +70,8 @@ spec:
         volumeMounts:
         - name: envoy-config
           mountPath: /etc/envoy
+        - name: logs
+          mountPath: /var/log/task-proxy
         {{- if .Values.tls.enabled }}
         - name: cert
           mountPath: /etc/certs
@@ -49,6 +84,7 @@ spec:
         image: {{ .Values.server.image.repository }}{{ if .Values.server.image.tag }}:{{ .Values.server.image.tag }}{{ end }}
         command: ["./server"]
         args:
+        - "-logging-config=/etc/task-proxy/logging.yaml"
         - "-yt-token-path=/etc/yt/token" 
         - "-yt-proxy={{ default (printf "http-proxies.%s.svc.cluster.local" .Release.Namespace) .Values.ytProxy }}"
         - "-base-domain={{ .Values.baseDomain }}"
@@ -72,6 +108,10 @@ spec:
         volumeMounts:
         - name: token
           mountPath: /etc/yt
+        - name: logging-config
+          mountPath: /etc/task-proxy
+        - name: logs
+          mountPath: /var/log/task-proxy
         {{- with .Values.server.resources }}
         resources:
           {{ toYaml . | nindent 10 }}
@@ -83,6 +123,12 @@ spec:
           items:
           - key: envoy.yaml
             path: envoy.yaml
+      - name: logging-config
+        configMap:
+          name: {{ .Release.Name }}-config
+          items:
+          - key: logging.yaml
+            path: logging.yaml
       - name: token
         secret:
           secretName: {{ .Values.tokenSecretRef }}

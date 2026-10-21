@@ -34,13 +34,35 @@ tls:
   enabled: false
   certSecretRef: yt-domain-cert
 
+# Retained, independent log claim for each StatefulSet ordinal. Allocated in every logging mode so toggling file output is a mutable Pod change.
+persistence:
+  storageClass: null # null: cluster default; "": no storage class
+  size: 5Gi
+  accessModes: [ReadWriteOnce]
+
+# The upstream Envoy container runs as UID/GID 101. CSI driver must support fsGroup.
+podSecurityContext:
+  fsGroup: 101
+
 proxy:
+  logging:
+    writerType: stderr
+    minLogLevel: info
+    rotationPolicy: null # file mode without a custom policy uses documented defaults
+  accessLog:
+    enabled: true
+    writerType: stderr
+    rotationPolicy: null
   image:
     repository: envoyproxy/envoy
     tag: v1.36-latest
   resources: {}
 
 server:
+  logging:
+    writerType: stderr
+    minLogLevel: debug
+    rotationPolicy: null
   image:
     repository: ghcr.io/ytsaurus/task-proxy
     tag: ""

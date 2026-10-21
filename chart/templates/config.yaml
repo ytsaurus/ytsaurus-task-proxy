@@ -4,6 +4,13 @@ metadata:
   name: {{ .Release.Name }}-config
   namespace: {{ .Release.Namespace }}
 data:
+  logging.yaml: |
+    server:
+      {{- include "task-proxy.logging" .Values.server.logging | nindent 6 }}
+    proxy:
+      {{- include "task-proxy.logging" .Values.proxy.logging | nindent 6 }}
+    accessLog:
+      {{- include "task-proxy.logging" .Values.proxy.accessLog | nindent 6 }}
   envoy.yaml: |
     node:
       cluster: cluster
