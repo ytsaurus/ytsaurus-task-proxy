@@ -7,12 +7,14 @@ import (
 )
 
 const (
-	defaultConnectTimeout    = 2 * time.Second
-	defaultRouteTimeout      = 15 * time.Second
-	defaultStreamIdleTimeout = 5 * time.Minute
+	defaultConnectTimeout        = 2 * time.Second
+	defaultRouteTimeout          = 15 * time.Second
+	defaultStreamIdleTimeout     = 5 * time.Minute
+	defaultAuthTimeout           = 800 * time.Millisecond
+	defaultYTLightRequestTimeout = 10 * time.Second
 )
 
-// TaskProxyTimeoutConfig controls timeout behavior for every task-proxy route.
+// TaskProxyTimeoutConfig controls routing, authorization and YT client timeouts.
 type TaskProxyTimeoutConfig struct {
 	// ConnectTimeout limits how long Envoy waits to establish a TCP connection to a job.
 	// It must be positive because Envoy requires a connect timeout for every cluster.
@@ -23,17 +25,29 @@ type TaskProxyTimeoutConfig struct {
 	// StreamIdleTimeout limits a request or response stream with no upstream or downstream traffic.
 	// Zero disables this timeout; active traffic keeps the stream alive regardless of this value.
 	StreamIdleTimeout time.Duration
+	// AuthTimeout covers the entire Envoy ext_authz check, including sequential YT calls.
+	AuthTimeout time.Duration
+	// YTLightRequestTimeout covers one light SDK call, including retries and backoffs.
+	YTLightRequestTimeout time.Duration
 }
 
 func DefaultTaskProxyTimeoutConfig() TaskProxyTimeoutConfig {
 	return TaskProxyTimeoutConfig{
-		ConnectTimeout:    defaultConnectTimeout,
-		RouteTimeout:      defaultRouteTimeout,
-		StreamIdleTimeout: defaultStreamIdleTimeout,
+		ConnectTimeout:        defaultConnectTimeout,
+		RouteTimeout:          defaultRouteTimeout,
+		StreamIdleTimeout:     defaultStreamIdleTimeout,
+		AuthTimeout:           defaultAuthTimeout,
+		YTLightRequestTimeout: defaultYTLightRequestTimeout,
 	}
 }
 
 func (c TaskProxyTimeoutConfig) Validate() error {
+	if c.AuthTimeout <= 0 {
+		return fmt.Errorf("auth-timeout must be positive (use a duration with units, e.g. 800ms or 2s)")
+	}
+	if c.YTLightRequestTimeout <= 0 {
+		return fmt.Errorf("yt-light-request-timeout must be positive (use a duration with units, e.g. 10s)")
+	}
 	if c.ConnectTimeout <= 0 {
 		return fmt.Errorf("connect timeout must be positive")
 	}

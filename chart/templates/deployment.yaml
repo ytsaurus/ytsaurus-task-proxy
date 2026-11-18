@@ -57,6 +57,8 @@ spec:
         - "-connect-timeout-seconds={{ .Values.timeouts.connectTimeoutSeconds }}"
         - "-route-timeout-seconds={{ .Values.timeouts.routeTimeoutSeconds }}"
         - "-stream-idle-timeout-seconds={{ .Values.timeouts.streamIdleTimeoutSeconds }}"
+        - "-auth-timeout={{ .Values.timeouts.authTimeout }}"
+        - "-yt-light-request-timeout={{ .Values.timeouts.ytLightRequestTimeout }}"
         - "-auth-enabled={{ .Values.auth.enabled }}"
         - "-auth-cookie-name={{ .Values.auth.cookieName }}"
         - "-auth-cache-enabled={{ .Values.auth.cache.enabled }}"

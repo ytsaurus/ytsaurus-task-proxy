@@ -11,11 +11,9 @@ import (
 func durationPtr(value time.Duration) *time.Duration { return &value }
 
 func TestValidateTaskProxyTimeoutConfig(t *testing.T) {
-	valid := TaskProxyTimeoutConfig{
-		ConnectTimeout:    2 * time.Second,
-		RouteTimeout:      0,
-		StreamIdleTimeout: 0,
-	}
+	valid := DefaultTaskProxyTimeoutConfig()
+	valid.RouteTimeout = 0
+	valid.StreamIdleTimeout = 0
 	require.NoError(t, valid.Validate())
 
 	invalidConnect := valid
@@ -41,4 +39,19 @@ func TestDurationFromSeconds(t *testing.T) {
 
 	_, err = DurationFromSeconds(int(math.MaxInt64/time.Second) + 1)
 	require.ErrorContains(t, err, "is too large")
+}
+
+func TestAuthorizationTimeoutDefaults(t *testing.T) {
+	config := DefaultTaskProxyTimeoutConfig()
+	require.Equal(t, 800*time.Millisecond, config.AuthTimeout)
+	require.Equal(t, 10*time.Second, config.YTLightRequestTimeout)
+	require.NoError(t, config.Validate())
+	for _, value := range []time.Duration{0, -time.Nanosecond} {
+		invalid := config
+		invalid.AuthTimeout = value
+		require.ErrorContains(t, invalid.Validate(), "auth-timeout must be positive")
+		invalid = config
+		invalid.YTLightRequestTimeout = value
+		require.ErrorContains(t, invalid.Validate(), "yt-light-request-timeout must be positive")
+	}
 }

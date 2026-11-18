@@ -13,6 +13,11 @@ dirPath: //sys/task_proxies
 discoveryPeriodSeconds: 60
 
 timeouts:
+  # Positive Go durations with units. These timeouts cannot be disabled with 0.
+  # Entire Envoy authorization check, including WhoAmI and permission checking.
+  authTimeout: "800ms"
+  # One light YT SDK call, including retries and backoffs, for all YT clients.
+  ytLightRequestTimeout: "10s"
   # Maximum time to establish a TCP connection to a task job.
   connectTimeoutSeconds: 2
   # Maximum time to wait for a complete upstream response. Set to 0 to disable.

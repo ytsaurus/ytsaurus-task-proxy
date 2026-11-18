@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -35,12 +36,14 @@ func (SimpleLogger) Errorf(format string, args ...any) {
 	log.Printf("ERROR: "+format, args...)
 }
 
-func CreateYTClient(proxy string, credentials ytsdk.Credentials, logger *SimpleLogger) (ytsdk.Client, error) {
-	timeout := time.Second * 10
+func CreateYTClient(proxy string, credentials ytsdk.Credentials, lightRequestTimeout time.Duration, logger *SimpleLogger) (ytsdk.Client, error) {
+	if lightRequestTimeout <= 0 {
+		return nil, fmt.Errorf("yt-light-request-timeout must be positive")
+	}
 	cfg := &ytsdk.Config{
 		Proxy:                 proxy,
 		Credentials:           credentials,
-		LightRequestTimeout:   &timeout,
+		LightRequestTimeout:   &lightRequestTimeout,
 		DisableProxyDiscovery: true,
 	}
 

@@ -18,7 +18,7 @@ CHART_PACKAGE := task-proxy-chart-$(RELEASE_VERSION).tgz
 .PHONY: test
 test:
 	@echo "🧪 Running tests..."
-	cd server/pkg && go test ./... -v
+	cd server && go test ./... -v
 
 .PHONY: build
 build:

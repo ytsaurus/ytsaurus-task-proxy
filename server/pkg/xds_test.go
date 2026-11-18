@@ -8,6 +8,7 @@ import (
 
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	listenerv3 "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	extauthzv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/ext_authz/v3"
 	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	cachetypes "github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -258,11 +259,8 @@ func TestMakeSnapshotTimeouts(t *testing.T) {
 			streamIdleTimeout: &zero,
 		},
 	}
-	config := TaskProxyTimeoutConfig{
-		ConnectTimeout:    3 * time.Second,
-		RouteTimeout:      15 * time.Second,
-		StreamIdleTimeout: 5 * time.Minute,
-	}
+	config := DefaultTaskProxyTimeoutConfig()
+	config.ConnectTimeout = 3 * time.Second
 
 	snapshot, err := makeSnapshot(map[string]Task{"abc12345": task}, "v1", "example.com", false, false, config)
 	require.NoError(t, err)
@@ -356,4 +354,19 @@ func httpConnectionManager(t *testing.T, listener *listenerv3.Listener) *hcmv3.H
 	err := listener.GetFilterChains()[0].GetFilters()[0].GetTypedConfig().UnmarshalTo(&hcm)
 	require.NoError(t, err)
 	return &hcm
+}
+
+func TestMakeSnapshotAuthTimeout(t *testing.T) {
+	for _, timeout := range []time.Duration{800 * time.Millisecond, 2500 * time.Millisecond, time.Minute} {
+		config := DefaultTaskProxyTimeoutConfig()
+		config.AuthTimeout = timeout
+		snapshot, err := makeSnapshot(nil, "v1", "example.com", false, true, config)
+		require.NoError(t, err)
+		hcm := httpConnectionManager(t, onlyListener(t, snapshot.GetResources(resourcev3.ListenerType)))
+		require.Equal(t, "envoy.filters.http.ext_authz", hcm.HttpFilters[0].Name)
+		var authz extauthzv3.ExtAuthz
+		require.NoError(t, hcm.HttpFilters[0].GetTypedConfig().UnmarshalTo(&authz))
+		require.Equal(t, timeout, authz.GetGrpcService().GetTimeout().AsDuration())
+		require.NoError(t, authz.ValidateAll())
+	}
 }

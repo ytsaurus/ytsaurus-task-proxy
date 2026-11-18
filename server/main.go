@@ -37,6 +37,8 @@ func main() {
 		connectTimeoutSeconds    int
 		routeTimeoutSeconds      int
 		streamIdleTimeoutSeconds int
+		authTimeout              time.Duration
+		ytLightRequestTimeout    time.Duration
 	}
 	flag.StringVar(&args.ytProxy, "yt-proxy", "", "YT proxy host")
 	flag.StringVar(&args.ytTokenPath, "yt-token-path", "", "YT token path")
@@ -53,6 +55,8 @@ func main() {
 	flag.IntVar(&args.connectTimeoutSeconds, "connect-timeout-seconds", int(defaultTimeoutConfig.ConnectTimeout/time.Second), "maximum time in seconds to establish an upstream job connection")
 	flag.IntVar(&args.routeTimeoutSeconds, "route-timeout-seconds", int(defaultTimeoutConfig.RouteTimeout/time.Second), "maximum time in seconds to wait for a complete upstream response (0 disables the timeout)")
 	flag.IntVar(&args.streamIdleTimeoutSeconds, "stream-idle-timeout-seconds", int(defaultTimeoutConfig.StreamIdleTimeout/time.Second), "maximum idle time in seconds for an upstream request or response stream (0 disables the timeout)")
+	flag.DurationVar(&args.authTimeout, "auth-timeout", defaultTimeoutConfig.AuthTimeout, "maximum time for the complete Envoy authorization check; positive duration with units (e.g. 800ms, 2s)")
+	flag.DurationVar(&args.ytLightRequestTimeout, "yt-light-request-timeout", defaultTimeoutConfig.YTLightRequestTimeout, "maximum time for one light YT SDK call including retries and backoffs; positive duration with units (e.g. 10s)")
 	flag.Parse()
 
 	if args.ytProxy == "" {
@@ -95,13 +99,16 @@ func main() {
 		log.Fatalf("invalid stream idle timeout: %v", err)
 	}
 	timeoutConfig := pkg.TaskProxyTimeoutConfig{
-		ConnectTimeout:    connectTimeout,
-		RouteTimeout:      routeTimeout,
-		StreamIdleTimeout: streamIdleTimeout,
+		ConnectTimeout:        connectTimeout,
+		RouteTimeout:          routeTimeout,
+		StreamIdleTimeout:     streamIdleTimeout,
+		AuthTimeout:           args.authTimeout,
+		YTLightRequestTimeout: args.ytLightRequestTimeout,
 	}
 	if err := timeoutConfig.Validate(); err != nil {
 		log.Fatalf("invalid task proxy timeout configuration: %v", err)
 	}
+	log.Printf("authorization timeouts: auth-timeout=%s, yt-light-request-timeout=%s", timeoutConfig.AuthTimeout, timeoutConfig.YTLightRequestTimeout)
 
 	ytTokenBytes, err := os.ReadFile(args.ytTokenPath)
 	if err != nil {
@@ -111,7 +118,7 @@ func main() {
 
 	logger := pkg.SimpleLogger{}
 
-	ytClient, err := pkg.CreateYTClient(args.ytProxy, &ytsdk.TokenCredentials{Token: ytToken}, &logger)
+	ytClient, err := pkg.CreateYTClient(args.ytProxy, &ytsdk.TokenCredentials{Token: ytToken}, timeoutConfig.YTLightRequestTimeout, &logger)
 	if err != nil {
 		pkg.DefaultMetrics().ObserveYTError("create_client", err)
 		log.Fatalf("failed to create YT client: %v", err)
@@ -128,7 +135,7 @@ func main() {
 
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
 
-	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, &logger, args.authCookieName, pkg.AuthCacheConfig{
+	authServer := pkg.CreateAuthServer(ytClient, args.ytProxy, timeoutConfig.YTLightRequestTimeout, &logger, args.authCookieName, pkg.AuthCacheConfig{
 		Enabled:                      args.authCacheEnabled,
 		TTLSeconds:                   args.authCacheTTLSeconds,
 		Capacity:                     args.authCacheCapacity,
