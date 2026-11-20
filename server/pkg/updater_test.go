@@ -26,7 +26,7 @@ func (s *failingSnapshotSetter) SetSnapshot(_ context.Context, _ string, _ cache
 }
 
 func TestUpdateDoesNotChangeAuthDataIfSetSnapshotFails(t *testing.T) {
-	authServer := CreateAuthServer(nil, "", defaultYTLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{})
+	authServer := CreateAuthServer(nil, "", DefaultYTLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{})
 
 	oldTask := Task{
 		operationID: "op-old",
@@ -115,7 +115,7 @@ func TestDiscoveryRetainedAndFreshTasksReachAllUpdaterOutputs(t *testing.T) {
 		hashToTask[task.Hash()] = task
 		aliases[task.OperationAlias()] = task.OperationID()
 	}
-	auth := CreateAuthServer(nil, "", defaultYTLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{})
+	auth := CreateAuthServer(nil, "", DefaultYTLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{})
 	cache := cachev3.NewSnapshotCache(true, cachev3.IDHash{}, &SimpleLogger{})
 	u := CreateTaskUpdater("example.com", false, true, DefaultTaskProxyTimeoutConfig(), auth, d, cache)
 	require.NoError(t, u.Update(context.Background(), hashToTask, aliases, "merged"))

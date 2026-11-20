@@ -2,14 +2,12 @@ package pkg
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -44,11 +42,11 @@ func TestEnvoyAuthorizationTimeout(t *testing.T) {
 		return 0
 	})
 	config := DefaultTaskProxyTimeoutConfig()
-	config.YTLightRequestTimeout = 5 * time.Second
-	client, err := CreateYTClient(proxy, &ytsdk.TokenCredentials{Token: "service-token"}, config.YTLightRequestTimeout, nil)
+	ytLightRequestTimeout := 5 * time.Second
+	client, err := CreateYTClient(proxy, &ytsdk.TokenCredentials{Token: "service-token"}, ytLightRequestTimeout, nil)
 	require.NoError(t, err)
 	t.Cleanup(client.Stop)
-	auth := CreateAuthServer(client, proxy, config.YTLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{Enabled: true, TTLSeconds: 30})
+	auth := CreateAuthServer(client, proxy, ytLightRequestTimeout, &SimpleLogger{}, "", AuthCacheConfig{Enabled: true, TTLSeconds: 30})
 	task := Task{operationID: "1-2-3-4", taskName: "worker", service: "api", protocol: HTTP}
 	tasks := map[string]Task{task.Hash(): task}
 	auth.SetTasksData(tasks, nil)
@@ -109,8 +107,10 @@ func TestEnvoyAuthorizationTimeout(t *testing.T) {
 		{"new budget exceeded", 2 * time.Second, 3 * time.Second, http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			config.AuthTimeout = tc.timeout
-			snapshot, err := makeSnapshot(nil, strconv.Itoa(i), "example.com", false, true, config)
+			// Reuse the version when only the stub's delay changes, not the listener config.
+			version := tc.timeout.String()
+			config.AuthCheckTimeout = tc.timeout
+			snapshot, err := makeSnapshot(nil, version, "example.com", false, true, config)
 			require.NoError(t, err)
 			// Only the test's network address differs from the production snapshot.
 			cluster := snapshot.GetResources(resourcev3.ClusterType)[extAuthClusterName].(*clusterv3.Cluster)
@@ -127,11 +127,8 @@ func TestEnvoyAuthorizationTimeout(t *testing.T) {
 				}
 				defer resp.Body.Close()
 				body, _ := io.ReadAll(resp.Body)
-				var dump any
-				if json.Unmarshal(body, &dump) != nil {
-					return false
-				}
-				return authTimeoutInConfigDump(dump) == tc.timeout
+				timeout, err := authCheckTimeoutInConfigDump(body, "listener_0", version)
+				return err == nil && timeout == tc.timeout
 			}, 15*time.Second, 100*time.Millisecond)
 			// An existing downstream connection can retain the previous listener's filter config.
 			// Each case must use the listener whose active config was just read back.
@@ -162,29 +159,4 @@ func TestEnvoyAuthorizationTimeout(t *testing.T) {
 			}
 		})
 	}
-}
-
-func authTimeoutInConfigDump(value any) time.Duration {
-	switch value := value.(type) {
-	case map[string]any:
-		if value["name"] == "envoy.filters.http.ext_authz" {
-			config, _ := value["typed_config"].(map[string]any)
-			service, _ := config["grpc_service"].(map[string]any)
-			timeout, _ := service["timeout"].(string)
-			duration, _ := time.ParseDuration(timeout)
-			return duration
-		}
-		for _, child := range value {
-			if timeout := authTimeoutInConfigDump(child); timeout > 0 {
-				return timeout
-			}
-		}
-	case []any:
-		for _, child := range value {
-			if timeout := authTimeoutInConfigDump(child); timeout > 0 {
-				return timeout
-			}
-		}
-	}
-	return 0
 }

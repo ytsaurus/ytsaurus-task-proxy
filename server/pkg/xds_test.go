@@ -356,10 +356,10 @@ func httpConnectionManager(t *testing.T, listener *listenerv3.Listener) *hcmv3.H
 	return &hcm
 }
 
-func TestMakeSnapshotAuthTimeout(t *testing.T) {
+func TestMakeSnapshotAuthCheckTimeout(t *testing.T) {
 	for _, timeout := range []time.Duration{800 * time.Millisecond, 2500 * time.Millisecond, time.Minute} {
 		config := DefaultTaskProxyTimeoutConfig()
-		config.AuthTimeout = timeout
+		config.AuthCheckTimeout = timeout
 		snapshot, err := makeSnapshot(nil, "v1", "example.com", false, true, config)
 		require.NoError(t, err)
 		hcm := httpConnectionManager(t, onlyListener(t, snapshot.GetResources(resourcev3.ListenerType)))

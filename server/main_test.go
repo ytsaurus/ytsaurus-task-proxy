@@ -27,16 +27,18 @@ func TestServerStartupTimeouts(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"defaults", nil, "auth-timeout=800ms, yt-light-request-timeout=10s"},
-		{"auth override", []string{"-auth-timeout=2.5s"}, "auth-timeout=2.5s, yt-light-request-timeout=10s"},
-		{"YT override", []string{"-yt-light-request-timeout=25s"}, "auth-timeout=800ms, yt-light-request-timeout=25s"},
-		{"auth zero", []string{"-auth-timeout=0s"}, "auth-timeout must be positive"},
-		{"auth negative", []string{"-auth-timeout=-1s"}, "auth-timeout must be positive"},
+		{"defaults", nil, "auth-check-timeout=800ms, yt-light-request-timeout=10s"},
+		{"auth override", []string{"-auth-check-timeout=2.5s"}, "auth-check-timeout=2.5s, yt-light-request-timeout=10s"},
+		{"YT override", []string{"-yt-light-request-timeout=25s"}, "auth-check-timeout=800ms, yt-light-request-timeout=25s"},
+		{"auth zero", []string{"-auth-check-timeout=0s"}, "auth-check-timeout must be positive"},
+		{"auth negative", []string{"-auth-check-timeout=-1s"}, "auth-check-timeout must be positive"},
 		{"YT zero", []string{"-yt-light-request-timeout=0"}, "yt-light-request-timeout must be positive"},
 		{"YT negative", []string{"-yt-light-request-timeout=-1s"}, "yt-light-request-timeout must be positive"},
-		{"auth missing unit", []string{"-auth-timeout=800"}, `invalid value "800" for flag -auth-timeout`},
+		{"auth empty", []string{"-auth-check-timeout="}, "parse error"},
+		{"YT empty", []string{"-yt-light-request-timeout="}, "parse error"},
+		{"auth missing unit", []string{"-auth-check-timeout=800"}, `invalid value "800" for flag -auth-check-timeout`},
 		{"YT malformed", []string{"-yt-light-request-timeout=bad"}, "parse error"},
-		{"auth overflow", []string{"-auth-timeout=999999999999999999s"}, "parse error"},
+		{"auth overflow", []string{"-auth-check-timeout=999999999999999999s"}, "parse error"},
 		{"YT overflow", []string{"-yt-light-request-timeout=999999999999999999s"}, "parse error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

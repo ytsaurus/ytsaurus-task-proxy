@@ -17,6 +17,9 @@ import (
 )
 
 const (
+	// DefaultYTLightRequestTimeout covers one light SDK call, including retries and backoffs.
+	DefaultYTLightRequestTimeout = 10 * time.Second
+
 	ytHTTPClientRetryCount    = 4
 	ytHTTPClientReplayBodyMax = 1 << 20 // 1 MiB
 )

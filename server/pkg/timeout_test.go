@@ -43,15 +43,11 @@ func TestDurationFromSeconds(t *testing.T) {
 
 func TestAuthorizationTimeoutDefaults(t *testing.T) {
 	config := DefaultTaskProxyTimeoutConfig()
-	require.Equal(t, 800*time.Millisecond, config.AuthTimeout)
-	require.Equal(t, 10*time.Second, config.YTLightRequestTimeout)
+	require.Equal(t, 800*time.Millisecond, config.AuthCheckTimeout)
 	require.NoError(t, config.Validate())
 	for _, value := range []time.Duration{0, -time.Nanosecond} {
 		invalid := config
-		invalid.AuthTimeout = value
-		require.ErrorContains(t, invalid.Validate(), "auth-timeout must be positive")
-		invalid = config
-		invalid.YTLightRequestTimeout = value
-		require.ErrorContains(t, invalid.Validate(), "yt-light-request-timeout must be positive")
+		invalid.AuthCheckTimeout = value
+		require.ErrorContains(t, invalid.Validate(), "auth-check-timeout must be positive")
 	}
 }

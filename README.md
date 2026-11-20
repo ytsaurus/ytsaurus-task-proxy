@@ -61,10 +61,12 @@ Two independent settings control authorization and calls to YT:
 
 | Helm value | Server flag | Default | Scope |
 | --- | --- | --- | --- |
-| `timeouts.authTimeout` | `-auth-timeout` | `800ms` | Complete Envoy external authorization check (`ext_authz.grpc_service.timeout`). |
+| `timeouts.authCheckTimeout` | `-auth-check-timeout` | `800ms` | Complete Envoy external authorization check (`ext_authz.grpc_service.timeout`). |
 | `timeouts.ytLightRequestTimeout` | `-yt-light-request-timeout` | `10s` | One light YT SDK call, including retries and backoffs. Applied to the service client (discovery, permission checks, registry writes) and user clients created for `WhoAmI`. |
 
-Use positive Go duration strings with explicit units, such as `800ms`, `2.5s`, or `1m`. Zero, negative, malformed and overflowing values are rejected at startup, even if authorization is disabled. Existing route timeouts and their operation annotation overrides remain separate.
+Use positive Go duration strings with explicit units, such as `800ms`, `2.5s`, or `1m`. These two settings use duration strings to support subsecond values; existing `*TimeoutSeconds` settings continue to accept integer seconds. Zero, negative, malformed and overflowing values are rejected at startup, even if authorization is disabled. Existing route timeouts and their operation annotation overrides remain separate.
+
+When upgrading with `--reuse-values`, missing new timeout keys inherit the server defaults. Explicitly empty or zero values are still rejected.
 
 On a cache miss, authorization normally runs `WhoAmI` and `CheckOperationPermission` sequentially. The outer authorization budget must cover both calls, their retries/backoffs and network overhead. `ytLightRequestTimeout` limits each individual SDK call; an earlier deadline from the outer request can interrupt it sooner. Choose the budgets together: increasing only the YT timeout cannot extend Envoy's authorization deadline. This does not configure cancellation of work on the YT HTTP proxy after a client disconnects. See also the [Envoy ext_authz configuration](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/ext_authz_filter).
 
@@ -72,7 +74,7 @@ For example, add to your deployment values file:
 
 ```yaml
 timeouts:
-  authTimeout: "25s"
+  authCheckTimeout: "25s"
   ytLightRequestTimeout: "10s"
 ```
 
@@ -85,12 +87,12 @@ helm upgrade task-proxy ./chart -n "$NAMESPACE" -f values.yaml
 kubectl rollout status deployment/task-proxy -n "$NAMESPACE"
 ```
 
-For a Terraform-managed release, change its Helm values in Terraform and use the normal plan/apply workflow. For a standalone binary, pass `-auth-timeout=25s -yt-light-request-timeout=10s` and restart it.
+For a Terraform-managed release, change its Helm values in Terraform and use the normal plan/apply workflow. For a standalone binary, pass `-auth-check-timeout=25s -yt-light-request-timeout=10s` and restart it.
 
 Verify each server replica's startup log contains the selected values:
 
 ```text
-authorization timeouts: auth-timeout=25s, yt-light-request-timeout=10s
+configured timeouts: auth-check-timeout=25s, yt-light-request-timeout=10s
 ```
 
 Independently inspect the **active** configuration on each Envoy replica. Forward its admin port (replace `POD` with one pod's name):
@@ -124,7 +126,7 @@ helm install task-proxy \
     ./chart
 ```
 
-Run all Go tests (including startup validation and delayed HTTP checks for both YT clients) with `make test`. The optional Envoy integration test requires Docker Desktop or Colima with `host.docker.internal` support and a local Envoy image:
+Run all Go tests (including startup validation and delayed HTTP checks for both YT clients) with `make test`. With Helm installed, this also runs chart regressions for default/custom values and upgrades reusing old values; CI installs Helm for these checks. The optional Envoy integration test requires Docker Desktop or Colima with `host.docker.internal` support and a local Envoy image:
 
 ```sh
 docker pull envoyproxy/envoy:v1.36-latest
