@@ -29,6 +29,11 @@ jobs:
         with:
           go-version-file: 'server/go.mod'
 
+      - name: Setup Helm for chart regression tests
+        uses: azure/setup-helm@v5
+        with:
+          version: 'v3.19.2'
+
       - name: Run unit tests
         shell: bash
         run: |

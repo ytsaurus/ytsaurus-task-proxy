@@ -10,9 +10,10 @@ const (
 	defaultConnectTimeout    = 2 * time.Second
 	defaultRouteTimeout      = 15 * time.Second
 	defaultStreamIdleTimeout = 5 * time.Minute
+	defaultAuthCheckTimeout  = 800 * time.Millisecond
 )
 
-// TaskProxyTimeoutConfig controls timeout behavior for every task-proxy route.
+// TaskProxyTimeoutConfig controls Envoy routing and authorization timeouts.
 type TaskProxyTimeoutConfig struct {
 	// ConnectTimeout limits how long Envoy waits to establish a TCP connection to a job.
 	// It must be positive because Envoy requires a connect timeout for every cluster.
@@ -23,6 +24,8 @@ type TaskProxyTimeoutConfig struct {
 	// StreamIdleTimeout limits a request or response stream with no upstream or downstream traffic.
 	// Zero disables this timeout; active traffic keeps the stream alive regardless of this value.
 	StreamIdleTimeout time.Duration
+	// AuthCheckTimeout covers the entire Envoy ext_authz check, including sequential YT calls.
+	AuthCheckTimeout time.Duration
 }
 
 func DefaultTaskProxyTimeoutConfig() TaskProxyTimeoutConfig {
@@ -30,10 +33,14 @@ func DefaultTaskProxyTimeoutConfig() TaskProxyTimeoutConfig {
 		ConnectTimeout:    defaultConnectTimeout,
 		RouteTimeout:      defaultRouteTimeout,
 		StreamIdleTimeout: defaultStreamIdleTimeout,
+		AuthCheckTimeout:  defaultAuthCheckTimeout,
 	}
 }
 
 func (c TaskProxyTimeoutConfig) Validate() error {
+	if c.AuthCheckTimeout <= 0 {
+		return fmt.Errorf("auth-check-timeout must be positive (use a duration with units, e.g. 800ms or 2s)")
+	}
 	if c.ConnectTimeout <= 0 {
 		return fmt.Errorf("connect timeout must be positive")
 	}

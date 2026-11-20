@@ -28,26 +28,28 @@ type AuthCacheConfig struct {
 type authServer struct {
 	authv3.UnimplementedAuthorizationServer
 
-	mx                 sync.RWMutex
-	hashToTasks        map[string]Task
-	operationAliasToID map[string]string
-	yt                 ytsdk.Client
-	ytProxy            string
-	logger             *SimpleLogger
-	authCookieName     string
-	cache              *authPermissionCache // cache is nil when caching is disabled.
+	mx                    sync.RWMutex
+	hashToTasks           map[string]Task
+	operationAliasToID    map[string]string
+	yt                    ytsdk.Client
+	ytProxy               string
+	ytLightRequestTimeout time.Duration
+	logger                *SimpleLogger
+	authCookieName        string
+	cache                 *authPermissionCache // cache is nil when caching is disabled.
 }
 
-func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, authCookieName string, cacheCfg AuthCacheConfig) *authServer {
+func CreateAuthServer(yt ytsdk.Client, ytProxy string, ytLightRequestTimeout time.Duration, logger *SimpleLogger, authCookieName string, cacheCfg AuthCacheConfig) *authServer {
 	cache := newAuthPermissionCache(cacheCfg, logger)
 	return &authServer{
-		hashToTasks:    make(map[string]Task),
-		mx:             sync.RWMutex{},
-		yt:             yt,
-		ytProxy:        ytProxy,
-		logger:         logger,
-		authCookieName: authCookieName,
-		cache:          cache,
+		hashToTasks:           make(map[string]Task),
+		mx:                    sync.RWMutex{},
+		yt:                    yt,
+		ytProxy:               ytProxy,
+		ytLightRequestTimeout: ytLightRequestTimeout,
+		logger:                logger,
+		authCookieName:        authCookieName,
+		cache:                 cache,
 	}
 }
 
@@ -144,7 +146,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 	}
 
 	allowed, _, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
-		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
+		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.ytLightRequestTimeout, s.logger)
 		if err != nil {
 			defaultMetrics.ObserveAuthYTError("create_client", err)
 			return false, "", err
