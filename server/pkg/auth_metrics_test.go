@@ -105,11 +105,11 @@ func TestAuthCheckCountsAuthenticatedUserRequests(t *testing.T) {
 
 			require.Equal(t, tc.whoamiCalls, whoamiCalls.Load())
 			require.NoError(t, testutil.GatherAndCompare(registry, strings.NewReader(`
-# HELP yt_task_proxy_user_requests_total Task Proxy authorization requests by authenticated YTsaurus user and rate limit decision.
+# HELP yt_task_proxy_user_requests_total Task Proxy authorization requests by authenticated YTsaurus user.
 # TYPE yt_task_proxy_user_requests_total counter
-yt_task_proxy_user_requests_total{rate_limit="not_evaluated",user="alice"} 2
-yt_task_proxy_user_requests_total{rate_limit="not_evaluated",user="bob"} 2
-yt_task_proxy_user_requests_total{rate_limit="not_evaluated",user="charlie"} 1
+yt_task_proxy_user_requests_total{user="alice"} 2
+yt_task_proxy_user_requests_total{user="bob"} 2
+yt_task_proxy_user_requests_total{user="charlie"} 1
 `), "yt_task_proxy_user_requests_total"))
 		})
 	}

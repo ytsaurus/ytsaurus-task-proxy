@@ -76,7 +76,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	s.logger.Debugf("auth for path %q, task %v", path, task)
 
 	allowed, user, err := s.checkOperationPermission(ctx, task.operationID, headers)
-	s.metrics.observeUserRequest(user, rateLimitNotEvaluated)
+	s.metrics.observeUserRequest(user)
 	if err != nil {
 		s.logger.Errorf("error while checking operation permission: %v", err)
 		return deniedResponse, nil

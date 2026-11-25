@@ -57,7 +57,7 @@ The Helm defaults are 2 seconds for connecting to a job, 15 seconds for a comple
 
 ## Monitoring requests by user
 
-Task Proxy exposes `yt_task_proxy_user_requests_total{user,rate_limit}` on the
+Task Proxy exposes `yt_task_proxy_user_requests_total{user}` on the
 server's `/metrics/prometheus` endpoint. With `monitoring.enabled: true`, the
 Helm chart scrapes server and Envoy metrics through the internal
 `<release>-metrics` service. The `job` label keeps the release name and the
@@ -73,18 +73,6 @@ YTsaurus login, so restrict access to the metrics endpoint and the monitoring
 backend. The number of series per replica grows with the number of distinct
 logins it observes.
 
-The `rate_limit` label records the decision for that request:
-
-| Value | Meaning |
-| --- | --- |
-| `not_evaluated` | No rate limit decision was made, including when the operation permission check denied access. |
-| `allowed` | The rate limiter allowed the request. |
-| `rejected` | The rate limiter rejected the request. Each rejection counts as one limit hit. |
-
-Before a rate limiter is connected, all observations have
-`rate_limit="not_evaluated"`. Outcome series appear after the first request
-with that outcome.
-
 Use these PromQL expressions for a single user. Filter by deployment labels
 such as `namespace` and `job` when sharing a monitoring backend.
 
@@ -94,12 +82,6 @@ sum by (user) (rate(yt_task_proxy_user_requests_total{user="alice"}[5m]))
 
 # Estimate the user's total requests over the last hour.
 sum by (user) (increase(yt_task_proxy_user_requests_total{user="alice"}[1h]))
-
-# Graph the RPS allowed and rejected by the rate limiter.
-sum by (user, rate_limit) (rate(yt_task_proxy_user_requests_total{user="alice",rate_limit=~"allowed|rejected"}[5m]))
-
-# Count rate limit hits over the last hour.
-sum by (user) (increase(yt_task_proxy_user_requests_total{user="alice",rate_limit="rejected"}[1h]))
 ```
 
 Calculate `rate` or `increase` for each series before summing across replicas
