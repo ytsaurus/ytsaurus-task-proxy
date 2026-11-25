@@ -64,9 +64,9 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 		userRequests: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "yt_task_proxy_user_requests_total",
-				Help: "Task Proxy authorization requests by authenticated YTsaurus user.",
+				Help: "Task Proxy authorization requests by authenticated YTsaurus user, cache status, and authorization result.",
 			},
-			[]string{"user"},
+			[]string{"user", "cache", "auth_result"},
 		),
 		authSuccesses: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -194,10 +194,15 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 }
 
 // observeUserRequest counts requests with a verified YTsaurus login.
-func (m *Metrics) observeUserRequest(user string) {
-	if user != "" {
-		m.userRequests.WithLabelValues(user).Inc()
+func (m *Metrics) observeUserRequest(result authPermissionResult, cacheStatus authCacheStatus) {
+	if result.login == "" {
+		return
 	}
+	reason := result.reason
+	if result.allowed() {
+		reason = "allowed"
+	}
+	m.userRequests.WithLabelValues(result.login, string(cacheStatus), reason).Inc()
 }
 
 func (m *Metrics) ObserveAuthSuccess(reason string) {

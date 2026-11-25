@@ -28,19 +28,19 @@ func TestAuthCacheMetricsHitMissAndSize(t *testing.T) {
 	beforeSize := testutil.ToFloat64(cache.metrics.authCacheEntries)
 
 	key := authCacheKey{credentials: "token:metrics-user", operationID: "metrics-op"}
-	loadFn := func(context.Context) (bool, string, error) {
-		return true, "user", nil
+	loadFn := func(context.Context) (authPermissionResult, error) {
+		return authPermissionResult{login: "user", reason: authReasonAuthorized}, nil
 	}
 
-	allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
+	result, cacheStatus, err := cache.GetOrLoad(context.Background(), key, loadFn)
 	require.NoError(t, err)
-	require.True(t, allowed)
-	require.Equal(t, "user", login)
+	require.Equal(t, authPermissionResult{login: "user", reason: authReasonAuthorized}, result)
+	require.Equal(t, authCacheMiss, cacheStatus)
 
-	allowed, login, err = cache.GetOrLoad(context.Background(), key, loadFn)
+	result, cacheStatus, err = cache.GetOrLoad(context.Background(), key, loadFn)
 	require.NoError(t, err)
-	require.True(t, allowed)
-	require.Equal(t, "user", login)
+	require.Equal(t, authPermissionResult{login: "user", reason: authReasonAuthorized}, result)
+	require.Equal(t, authCacheHit, cacheStatus)
 
 	require.Equal(t, beforeHits+1, testutil.ToFloat64(cache.metrics.authCacheHits))
 	require.Equal(t, beforeMisses+1, testutil.ToFloat64(cache.metrics.authCacheMisses))
@@ -63,9 +63,9 @@ func TestAuthCacheMetricsInFlightAndWaitingRequests(t *testing.T) {
 
 	key := authCacheKey{credentials: "token:wait-user", operationID: "wait-op"}
 	release := make(chan struct{})
-	loadFn := func(context.Context) (bool, string, error) {
+	loadFn := func(context.Context) (authPermissionResult, error) {
 		<-release
-		return true, "user", nil
+		return authPermissionResult{login: "user", reason: authReasonAuthorized}, nil
 	}
 
 	var wg sync.WaitGroup
@@ -73,8 +73,8 @@ func TestAuthCacheMetricsInFlightAndWaitingRequests(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
-		if err == nil && (!allowed || login != "user") {
+		result, cacheStatus, err := cache.GetOrLoad(context.Background(), key, loadFn)
+		if err == nil && (!result.allowed() || result.login != "user" || cacheStatus != authCacheMiss) {
 			err = errors.New("unexpected auth cache result for first request")
 		}
 		errs <- err
@@ -86,8 +86,8 @@ func TestAuthCacheMetricsInFlightAndWaitingRequests(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
-		if err == nil && (!allowed || login != "user") {
+		result, cacheStatus, err := cache.GetOrLoad(context.Background(), key, loadFn)
+		if err == nil && (!result.allowed() || result.login != "user" || cacheStatus != authCacheMiss) {
 			err = errors.New("unexpected auth cache result for second request")
 		}
 		errs <- err

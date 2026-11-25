@@ -24,24 +24,22 @@ func TestAuthPermissionCacheSingleflightByKey(t *testing.T) {
 
 	releaseLoad := make(chan struct{})
 	var loadCalls atomic.Int32
-	loadFn := func(ctx context.Context) (bool, string, error) {
+	loadFn := func(ctx context.Context) (authPermissionResult, error) {
 		loadCalls.Add(1)
 		<-releaseLoad
-		return true, "user", nil
+		return authPermissionResult{login: "user", reason: authReasonAuthorized}, nil
 	}
 
 	const goroutines = 20
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	results := make(chan bool, goroutines)
-	logins := make(chan string, goroutines)
+	results := make(chan authPermissionResult, goroutines)
 	errs := make(chan error, goroutines)
 	for range goroutines {
 		go func() {
 			defer wg.Done()
-			allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
-			results <- allowed
-			logins <- login
+			result, _, err := cache.GetOrLoad(context.Background(), key, loadFn)
+			results <- result
 			errs <- err
 		}()
 	}
@@ -50,18 +48,14 @@ func TestAuthPermissionCacheSingleflightByKey(t *testing.T) {
 	close(releaseLoad)
 	wg.Wait()
 	close(results)
-	close(logins)
 	close(errs)
 
 	require.Equal(t, int32(1), loadCalls.Load())
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	for allowed := range results {
-		require.True(t, allowed)
-	}
-	for login := range logins {
-		require.Equal(t, "user", login)
+	for result := range results {
+		require.Equal(t, authPermissionResult{login: "user", reason: authReasonAuthorized}, result)
 	}
 }
 
@@ -78,7 +72,7 @@ func TestAuthPermissionCacheRespectsPerKeyConcurrentMissLimit(t *testing.T) {
 	var maxInFlight atomic.Int32
 	var loadCalls atomic.Int32
 	releaseLoad := make(chan struct{})
-	loadFn := func(ctx context.Context) (bool, string, error) {
+	loadFn := func(ctx context.Context) (authPermissionResult, error) {
 		cur := inFlight.Add(1)
 		for {
 			prev := maxInFlight.Load()
@@ -89,7 +83,7 @@ func TestAuthPermissionCacheRespectsPerKeyConcurrentMissLimit(t *testing.T) {
 		loadCalls.Add(1)
 		<-releaseLoad
 		inFlight.Add(-1)
-		return true, "user", nil
+		return authPermissionResult{login: "user", reason: authReasonAuthorized}, nil
 	}
 
 	key := authCacheKey{
@@ -104,16 +98,16 @@ func TestAuthPermissionCacheRespectsPerKeyConcurrentMissLimit(t *testing.T) {
 	for i := 0; i < requests; i++ {
 		go func() {
 			defer wg.Done()
-			allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
+			result, _, err := cache.GetOrLoad(context.Background(), key, loadFn)
 			if err != nil {
 				errs <- err
 				return
 			}
-			if !allowed {
+			if !result.allowed() {
 				errs <- errors.New("permission should be allowed")
 				return
 			}
-			if login != "user" {
+			if result.login != "user" {
 				errs <- errors.New("login should be user")
 			}
 		}()
@@ -146,7 +140,7 @@ func TestAuthPermissionCacheLimitIsNotGlobal(t *testing.T) {
 	var inFlight atomic.Int32
 	var maxInFlight atomic.Int32
 	releaseLoad := make(chan struct{})
-	loadFn := func(ctx context.Context) (bool, string, error) {
+	loadFn := func(ctx context.Context) (authPermissionResult, error) {
 		cur := inFlight.Add(1)
 		for {
 			prev := maxInFlight.Load()
@@ -156,7 +150,7 @@ func TestAuthPermissionCacheLimitIsNotGlobal(t *testing.T) {
 		}
 		<-releaseLoad
 		inFlight.Add(-1)
-		return true, "user", nil
+		return authPermissionResult{login: "user", reason: authReasonAuthorized}, nil
 	}
 
 	key1 := authCacheKey{credentials: "token:u1", operationID: "op1"}
@@ -167,16 +161,16 @@ func TestAuthPermissionCacheLimitIsNotGlobal(t *testing.T) {
 	errs := make(chan error, 2)
 	go func() {
 		defer wg.Done()
-		allowed, login, err := cache.GetOrLoad(context.Background(), key1, loadFn)
-		if err == nil && (!allowed || login != "user") {
+		result, _, err := cache.GetOrLoad(context.Background(), key1, loadFn)
+		if err == nil && (!result.allowed() || result.login != "user") {
 			err = errors.New("unexpected result for key1")
 		}
 		errs <- err
 	}()
 	go func() {
 		defer wg.Done()
-		allowed, login, err := cache.GetOrLoad(context.Background(), key2, loadFn)
-		if err == nil && (!allowed || login != "user") {
+		result, _, err := cache.GetOrLoad(context.Background(), key2, loadFn)
+		if err == nil && (!result.allowed() || result.login != "user") {
 			err = errors.New("unexpected result for key2")
 		}
 		errs <- err
@@ -212,35 +206,35 @@ func TestAuthPermissionCacheProactiveRefresh(t *testing.T) {
 	key := authCacheKey{credentials: "token:u", operationID: "op-proactive"}
 
 	var loadCalls atomic.Int32
-	loadFn := func(ctx context.Context) (bool, string, error) {
+	loadFn := func(ctx context.Context) (authPermissionResult, error) {
 		call := loadCalls.Add(1)
 		// first load: true, proactive refresh load: false
 		if call == 1 {
-			return true, "user-first", nil
+			return authPermissionResult{login: "user-first", reason: authReasonAuthorized}, nil
 		}
-		return false, "user-second", nil
+		return authPermissionResult{login: "user-second", reason: authReasonPermissionDenied}, nil
 	}
 
-	allowed, login, err := cache.GetOrLoad(context.Background(), key, loadFn)
+	result, _, err := cache.GetOrLoad(context.Background(), key, loadFn)
 	require.NoError(t, err)
-	require.True(t, allowed)
-	require.Equal(t, "user-first", login)
+	require.True(t, result.allowed())
+	require.Equal(t, "user-first", result.login)
 	require.Equal(t, int32(1), loadCalls.Load())
 
 	time.Sleep(35 * time.Millisecond) // remaining TTL is now below refresh threshold.
 
-	allowed, login, err = cache.GetOrLoad(context.Background(), key, loadFn)
+	result, _, err = cache.GetOrLoad(context.Background(), key, loadFn)
 	require.NoError(t, err)
-	require.True(t, allowed) // stale value while refresh is happening
-	require.Equal(t, "user-first", login)
+	require.True(t, result.allowed()) // stale value while refresh is happening
+	require.Equal(t, "user-first", result.login)
 
 	require.Eventually(t, func() bool {
 		return loadCalls.Load() >= 2
 	}, time.Second, 10*time.Millisecond)
 
 	require.Eventually(t, func() bool {
-		allowed, login, err = cache.GetOrLoad(context.Background(), key, loadFn)
+		result, _, err = cache.GetOrLoad(context.Background(), key, loadFn)
 		require.NoError(t, err)
-		return !allowed && login == "user-second"
+		return result == (authPermissionResult{login: "user-second", reason: authReasonPermissionDenied})
 	}, time.Second, 10*time.Millisecond)
 }

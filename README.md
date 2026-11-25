@@ -57,7 +57,7 @@ The Helm defaults are 2 seconds for connecting to a job, 15 seconds for a comple
 
 ## Monitoring requests by user
 
-Task Proxy exposes `yt_task_proxy_user_requests_total{user}` on the
+Task Proxy exposes `yt_task_proxy_user_requests_total{user,cache,auth_result}` on the
 server's `/metrics/prometheus` endpoint. With `monitoring.enabled: true`, the
 Helm chart scrapes server and Envoy metrics through the internal
 `<release>-metrics` service. The `job` label keeps the release name and the
@@ -65,13 +65,27 @@ Helm chart scrapes server and Envoy metrics through the internal
 queries that filter on the old service name.
 
 The counter increments once for each authorization request with a verified
-YTsaurus login, including auth cache hits and requests denied by the operation
-permission check. Requests that bypass authorization or fail before a login is
-known are excluded. For gRPC streams and WebSockets, the counter measures
-authorization of the request or handshake. The `user` label contains the
-YTsaurus login, so restrict access to the metrics endpoint and the monitoring
-backend. The number of series per replica grows with the number of distinct
-logins it observes.
+YTsaurus login, including requests denied by the operation permission check.
+Requests that bypass authorization or fail before a login is known are excluded.
+For gRPC streams and WebSockets, the counter measures authorization of the
+request or handshake.
+
+- `user` is the verified YTsaurus login. Restrict access to the metrics endpoint
+  and the monitoring backend.
+- `cache` describes the operation permission cache. It is `hit` when a valid
+  entry is available on the initial lookup, `miss` when there is no valid
+  entry on that lookup (including requests waiting for an in-flight check),
+  or `disabled` when the cache is off.
+- `auth_result` is the final authorization outcome. The current outcomes are
+  `allowed`, `permission_denied` for an operation ACL denial,
+  `invalid_operation_id`, and the existing `infra_*` failure reasons such as
+  `infra_context_deadline_exceeded` and `infra_grpc_unavailable`. A cached
+  decision retains its outcome. Background cache refreshes are excluded from
+  this counter.
+
+Each replica exports one series per observed combination of labels. When rate
+limiting is added, a rejected request can use `auth_result="rate_limited"` in
+the same counter. The `cache` label will still describe the ACL lookup.
 
 Use these PromQL expressions for a single user. Filter by deployment labels
 such as `namespace` and `job` when sharing a monitoring backend.
@@ -82,6 +96,12 @@ sum by (user) (rate(yt_task_proxy_user_requests_total{user="alice"}[5m]))
 
 # Estimate the user's total requests over the last hour.
 sum by (user) (increase(yt_task_proxy_user_requests_total{user="alice"}[1h]))
+
+# Break down the user's requests by cache status over the last hour.
+sum by (cache) (increase(yt_task_proxy_user_requests_total{user="alice"}[1h]))
+
+# Break down the user's denied and failed requests by cache status and result.
+sum by (cache, auth_result) (increase(yt_task_proxy_user_requests_total{user="alice",auth_result!="allowed"}[1h]))
 ```
 
 Calculate `rate` or `increase` for each series before summing across replicas

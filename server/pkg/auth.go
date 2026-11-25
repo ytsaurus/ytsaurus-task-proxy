@@ -25,6 +25,15 @@ type AuthCacheConfig struct {
 	RefreshBeforeSeconds         int
 }
 
+type authPermissionResult struct {
+	login  string
+	reason string
+}
+
+func (r authPermissionResult) allowed() bool {
+	return r.reason == authReasonAuthorized
+}
+
 type authServer struct {
 	authv3.UnimplementedAuthorizationServer
 
@@ -75,14 +84,16 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 
 	s.logger.Debugf("auth for path %q, task %v", path, task)
 
-	allowed, user, err := s.checkOperationPermission(ctx, task.operationID, headers)
-	s.metrics.observeUserRequest(user)
+	result, cacheStatus, err := s.checkOperationPermission(ctx, task.operationID, headers)
+	// The upcoming rate limiter will run after the permission check. Record one
+	// final authorization outcome per request here, after both checks.
+	s.metrics.observeUserRequest(result, cacheStatus)
 	if err != nil {
 		s.logger.Errorf("error while checking operation permission: %v", err)
 		return deniedResponse, nil
 	}
 
-	if !allowed {
+	if !result.allowed() {
 		return deniedResponse, nil
 	}
 	return okResponse, nil
@@ -133,12 +144,12 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 	}
 }
 
-func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, string, error) {
+func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (authPermissionResult, authCacheStatus, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
 		s.logger.Warnf("request without credentials, headers: %v", headers)
 		s.metrics.ObserveAuthFailure(authReasonCredentials, nil)
-		return false, "", nil
+		return authPermissionResult{}, "", nil
 	}
 
 	cacheKey := authCacheKey{
@@ -146,11 +157,11 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		operationID: operationID,
 	}
 
-	allowed, user, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
+	result, cacheStatus, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (authPermissionResult, error) {
 		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
 		if err != nil {
 			s.metrics.ObserveAuthYTError("create_client", err)
-			return false, "", err
+			return authPermissionResult{}, err
 		}
 
 		whoAmIStarted := time.Now()
@@ -159,14 +170,14 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		if err != nil {
 			s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
 			s.metrics.ObserveAuthYTError("whoami", err)
-			return false, "", err
+			return authPermissionResult{}, err
 		}
 
 		user := userResp.Login
 		if user == "" {
 			s.logger.Errorf("user not identified by provided credentials: %v", userResp)
 			s.metrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
-			return false, "", nil
+			return authPermissionResult{}, nil
 		}
 		s.logger.Debugf("auth user is %q", user)
 
@@ -174,7 +185,7 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		if err != nil {
 			s.logger.Warnf("invalid operation ID %s", operationID)
 			s.metrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
-			return false, user, nil
+			return authPermissionResult{login: user, reason: authReasonInvalidOperation}, nil
 		}
 
 		permissionCheckStarted := time.Now()
@@ -188,24 +199,27 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		s.metrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 		if err != nil {
 			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
-			s.metrics.ObserveAuthYTError("permission_check", err)
-			return false, user, err
+			reason := s.metrics.ObserveAuthYTError("permission_check", err)
+			return authPermissionResult{login: user, reason: reason}, err
 		}
 
-		allowed := resp.Action == "allow"
+		reason := authReasonPermissionDenied
+		if resp.Action == "allow" {
+			reason = authReasonAuthorized
+		}
 		s.logger.Debugf("check operation permission result is %q for user %q and operation %q", resp.Action, user, operationID)
-		return allowed, user, nil
+		return authPermissionResult{login: user, reason: reason}, nil
 	})
 	if err != nil {
-		return false, user, err
+		return result, cacheStatus, err
 	}
 
-	if !allowed {
+	if result.allowed() {
+		s.metrics.ObserveAuthSuccess(authReasonAuthorized)
+	} else {
 		s.metrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
-		return false, user, nil
 	}
-	s.metrics.ObserveAuthSuccess(authReasonAuthorized)
-	return true, user, nil
+	return result, cacheStatus, nil
 }
 
 func (s *authServer) getYTCredentialsFromHeaders(headers map[string]string) ytsdk.Credentials {
