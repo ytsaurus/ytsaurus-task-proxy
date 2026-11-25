@@ -34,6 +34,7 @@ type authServer struct {
 	yt                 ytsdk.Client
 	ytProxy            string
 	logger             *SimpleLogger
+	metrics            *Metrics
 	authCookieName     string
 	cache              *authPermissionCache // cache is nil when caching is disabled.
 }
@@ -46,6 +47,7 @@ func CreateAuthServer(yt ytsdk.Client, ytProxy string, logger *SimpleLogger, aut
 		yt:             yt,
 		ytProxy:        ytProxy,
 		logger:         logger,
+		metrics:        defaultMetrics,
 		authCookieName: authCookieName,
 		cache:          cache,
 	}
@@ -59,7 +61,7 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 
 	task, err := s.findTaskByRequest(host, headers)
 	if err != nil {
-		defaultMetrics.ObserveAuthFailure(authReasonTaskLookup, nil)
+		s.metrics.ObserveAuthFailure(authReasonTaskLookup, nil)
 		s.logger.Warnf("failed to find task during auth check: %s", err)
 		return deniedResponse, nil
 	}
@@ -67,13 +69,14 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	// skip auth for UI services for statics; currently it is the case for SPYT UI
 	if task.service == "ui" && strings.HasPrefix(path, "/static") {
 		s.logger.Debugf("skip auth for 'ui' service for statics on path %s", path)
-		defaultMetrics.ObserveAuthSuccess(authReasonStaticBypass)
+		s.metrics.ObserveAuthSuccess(authReasonStaticBypass)
 		return okResponse, nil
 	}
 
 	s.logger.Debugf("auth for path %q, task %v", path, task)
 
-	allowed, err := s.checkOperationPermission(ctx, task.operationID, headers)
+	allowed, user, err := s.checkOperationPermission(ctx, task.operationID, headers)
+	s.metrics.observeUserRequest(user, rateLimitNotEvaluated)
 	if err != nil {
 		s.logger.Errorf("error while checking operation permission: %v", err)
 		return deniedResponse, nil
@@ -130,12 +133,12 @@ func (s *authServer) findTaskByRequest(host string, headers map[string]string) (
 	}
 }
 
-func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, error) {
+func (s *authServer) checkOperationPermission(ctx context.Context, operationID string, headers map[string]string) (bool, string, error) {
 	userCredentials := s.getYTCredentialsFromHeaders(headers)
 	if userCredentials == nil {
 		s.logger.Warnf("request without credentials, headers: %v", headers)
-		defaultMetrics.ObserveAuthFailure(authReasonCredentials, nil)
-		return false, nil
+		s.metrics.ObserveAuthFailure(authReasonCredentials, nil)
+		return false, "", nil
 	}
 
 	cacheKey := authCacheKey{
@@ -143,26 +146,26 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		operationID: operationID,
 	}
 
-	allowed, _, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
+	allowed, user, err := s.cache.GetOrLoad(ctx, cacheKey, func(checkCtx context.Context) (bool, string, error) {
 		userYT, err := CreateYTClient(s.ytProxy, userCredentials, s.logger)
 		if err != nil {
-			defaultMetrics.ObserveAuthYTError("create_client", err)
+			s.metrics.ObserveAuthYTError("create_client", err)
 			return false, "", err
 		}
 
 		whoAmIStarted := time.Now()
 		userResp, err := userYT.WhoAmI(checkCtx, nil)
-		defaultMetrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
+		s.metrics.ObserveYTDuration("whoami", time.Since(whoAmIStarted))
 		if err != nil {
 			s.logger.Errorf("whoami failed: dur=%s, err=%v", time.Since(whoAmIStarted), err)
-			defaultMetrics.ObserveAuthYTError("whoami", err)
+			s.metrics.ObserveAuthYTError("whoami", err)
 			return false, "", err
 		}
 
 		user := userResp.Login
 		if user == "" {
 			s.logger.Errorf("user not identified by provided credentials: %v", userResp)
-			defaultMetrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
+			s.metrics.ObserveAuthFailure(authReasonUserNotIdentified, nil)
 			return false, "", nil
 		}
 		s.logger.Debugf("auth user is %q", user)
@@ -170,8 +173,8 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		operationIDg, err := guid.ParseString(operationID)
 		if err != nil {
 			s.logger.Warnf("invalid operation ID %s", operationID)
-			defaultMetrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
-			return false, "", nil
+			s.metrics.ObserveAuthFailure(authReasonInvalidOperation, nil)
+			return false, user, nil
 		}
 
 		permissionCheckStarted := time.Now()
@@ -182,11 +185,11 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 			yt.PermissionRead,
 			nil,
 		)
-		defaultMetrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
+		s.metrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 		if err != nil {
 			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
-			defaultMetrics.ObserveAuthYTError("permission_check", err)
-			return false, "", err
+			s.metrics.ObserveAuthYTError("permission_check", err)
+			return false, user, err
 		}
 
 		allowed := resp.Action == "allow"
@@ -194,15 +197,15 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		return allowed, user, nil
 	})
 	if err != nil {
-		return false, err
+		return false, user, err
 	}
 
 	if !allowed {
-		defaultMetrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
-		return false, nil
+		s.metrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
+		return false, user, nil
 	}
-	defaultMetrics.ObserveAuthSuccess(authReasonAuthorized)
-	return true, nil
+	s.metrics.ObserveAuthSuccess(authReasonAuthorized)
+	return true, user, nil
 }
 
 func (s *authServer) getYTCredentialsFromHeaders(headers map[string]string) ytsdk.Credentials {

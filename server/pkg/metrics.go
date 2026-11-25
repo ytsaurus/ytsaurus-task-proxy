@@ -18,6 +18,7 @@ import (
 )
 
 type Metrics struct {
+	userRequests             *prometheus.CounterVec
 	authSuccesses            *prometheus.CounterVec
 	authFailures             *prometheus.CounterVec
 	authErrors               *prometheus.CounterVec
@@ -34,6 +35,14 @@ type Metrics struct {
 	ytRequestError           *prometheus.CounterVec
 	ytRequestDuration        *prometheus.HistogramVec
 }
+
+type rateLimitDecision string
+
+const (
+	rateLimitNotEvaluated rateLimitDecision = "not_evaluated"
+	rateLimitAllowed      rateLimitDecision = "allowed"
+	rateLimitRejected     rateLimitDecision = "rejected"
+)
 
 const (
 	authReasonAuthorized        = "authorized"
@@ -60,6 +69,13 @@ const (
 
 func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	m := &Metrics{
+		userRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_user_requests_total",
+				Help: "Task Proxy authorization requests by authenticated YTsaurus user and rate limit decision.",
+			},
+			[]string{"user", "rate_limit"},
+		),
 		authSuccesses: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "yt_task_proxy_auth_success_total",
@@ -164,6 +180,7 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	}
 
 	registerer.MustRegister(
+		m.userRequests,
 		m.authSuccesses,
 		m.authFailures,
 		m.authErrors,
@@ -182,6 +199,13 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	)
 
 	return m
+}
+
+// observeUserRequest records one outcome per request using the verified YTsaurus login.
+func (m *Metrics) observeUserRequest(user string, decision rateLimitDecision) {
+	if user != "" {
+		m.userRequests.WithLabelValues(user, string(decision)).Inc()
+	}
 }
 
 func (m *Metrics) ObserveAuthSuccess(reason string) {

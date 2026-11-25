@@ -17,12 +17,14 @@ metadata:
     release: prometheus-stack
   {{- end }}
 spec:
+  jobLabel: app.kubernetes.io/instance
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
   selector:
     matchLabels:
-      yt_component: task-proxy
+      app.kubernetes.io/component: task-proxy-metrics
+      app.kubernetes.io/instance: {{ .Release.Name | quote }}
   endpoints:
     - port: metrics
       path: /metrics/prometheus
