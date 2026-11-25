@@ -24,14 +24,23 @@ func TestValidateTask(t *testing.T) {
 			},
 		},
 		{
-			name: "invalid alias",
+			name: "alias with hyphen is valid",
 			task: Task{
 				operationID:    "123",
 				operationAlias: "ali-as",
 				taskName:       "task",
 				service:        "service",
 			},
-			err: errors.New("field \"operationAlias\" value \"ali-as\" does not match regexp \"^[a-z0-9_]{1,30}$\""),
+		},
+		{
+			name: "invalid alias (leading hyphen)",
+			task: Task{
+				operationID:    "123",
+				operationAlias: "-alias",
+				taskName:       "task",
+				service:        "service",
+			},
+			err: errors.New("field \"operationAlias\" value \"-alias\" does not match regexp \"^[a-z0-9_]([a-z0-9_-]{0,28}[a-z0-9_])?$\""),
 		},
 		{
 			name: "invalid task name",

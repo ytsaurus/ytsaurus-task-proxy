@@ -60,8 +60,12 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	task, err := s.findTaskByRequest(host, headers)
 	if err != nil {
 		defaultMetrics.ObserveAuthFailure(authReasonTaskLookup, nil)
-		s.logger.Warnf("failed to find task during auth check: %s", err)
-		return deniedResponse, nil
+		// Not an authz failure: the task isn't in our tables (yet). This is normal right
+		// after an operation restart — the new operation must reach "running" and be
+		// picked up by the next discovery pass. Return 503 (transient) rather than 403,
+		// so the client retries instead of surfacing a scary "permission denied".
+		s.logger.Warnf("task not found during auth check (likely starting): %s", err)
+		return taskNotFoundResponse, nil
 	}
 
 	// skip auth for UI services for statics; currently it is the case for SPYT UI
@@ -264,6 +268,21 @@ var (
 			DeniedResponse: &authv3.DeniedHttpResponse{
 				Status: &typev3.HttpStatus{Code: typev3.StatusCode_Forbidden},
 				Body:   "permission denied",
+			},
+		},
+	}
+	// Returned when the requested task is not (yet) in the routing tables — typically a
+	// notebook/clique whose operation just restarted and hasn't been rediscovered.
+	// Transient, so 503 (not 403): the client should retry, and it isn't an authz failure.
+	taskNotFoundResponse = &authv3.CheckResponse{
+		Status: &status.Status{
+			Code:    int32(codes.Unavailable),
+			Message: "task not found or starting",
+		},
+		HttpResponse: &authv3.CheckResponse_DeniedResponse{
+			DeniedResponse: &authv3.DeniedHttpResponse{
+				Status: &typev3.HttpStatus{Code: typev3.StatusCode_ServiceUnavailable},
+				Body:   "task not found or starting, please retry",
 			},
 		},
 	}
