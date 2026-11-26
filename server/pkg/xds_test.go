@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -237,10 +238,44 @@ listener:
   name: listener_0
 `
 
+	var pathRoutes strings.Builder
+	for _, path := range []string{"/tasks/myalias/worker/api", "/tasks/op123/worker/api", "/tasks/abc12345"} {
+		for _, match := range []string{"prefix: " + path + "/", "path: " + path} {
+			fmt.Fprintf(&pathRoutes, `            - match:
+                headers:
+                - name: ':authority'
+                  safeRegexMatch:
+                    regex: '(?i)example\.com(:[0-9]+)?'
+                %s
+              route:
+                prefixRewrite: /
+                weightedClusters:
+                  clusters:
+                  - name: op123-worker-api-0
+                    weight: 1
+                  - name: op123-worker-api-1
+                    weight: 1
+              typedPerFilterConfig:
+                envoy.filters.http.ext_authz:
+                  '@type': type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthzPerRoute
+                  checkSettings:
+                    contextExtensions:
+                      task_proxy_path_operation_id: op123
+`, match)
+		}
+	}
+	const defaultRoutes = "            name: vhost_default\n            routes:\n"
+	expectedYAML = strings.Replace(expectedYAML, defaultRoutes, defaultRoutes+pathRoutes.String(), 1)
+
 	expectedYAML = strings.ReplaceAll(
 		expectedYAML,
 		"route:\n                weightedClusters:",
 		"route:\n                idleTimeout: 300s\n                timeout: 15s\n                weightedClusters:",
+	)
+	expectedYAML = strings.ReplaceAll(
+		expectedYAML,
+		"route:\n                prefixRewrite:",
+		"route:\n                idleTimeout: 300s\n                timeout: 15s\n                prefixRewrite:",
 	)
 	assert.YAMLEq(t, expectedYAML, string(resultYAML))
 }
@@ -335,10 +370,9 @@ func TestMakeSnapshotWebSocket(t *testing.T) {
 			}
 		}
 	}
-	// domain vhost + id header + operation-id headers + alias headers
-	require.Equal(t, 4, websocketRoutes)
-	// domain vhost + id header + operation-id headers (no alias)
-	require.Equal(t, 3, httpRoutes)
+	// Each path selector adds an exact route and a slash-prefixed route.
+	require.Equal(t, 4+6, websocketRoutes)
+	require.Equal(t, 3+4, httpRoutes)
 }
 
 func onlyListener(t *testing.T, resources map[string]cachetypes.Resource) *listenerv3.Listener {
