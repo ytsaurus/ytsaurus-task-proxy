@@ -15,6 +15,22 @@ For more information, refer to:
 - [Spark UI](https://ytsaurus.tech/docs/user-guide/data-processing/spyt/spark-ui) to learn how to open UI of [SPYT](https://ytsaurus.tech/docs/en/user-guide/data-processing/spyt/overview) clusters and jobs,
 - [Admin docs](https://ytsaurus.tech/docs/admin-guide/install-task-proxy) for installation instructions.
 
+## Accessing a service by path
+
+On the configured base domain, use one of these URL forms:
+
+- `/tasks/<service-descriptor-hash>`
+- `/tasks/<operation-alias>/<task-name>/<service>`
+- `/tasks/<operation-id>/<task-name>/<service>`
+
+For example, request `https://my-cluster.ytsaurus.example.net/tasks/my-operation/master/ui/`
+with an `Authorization: OAuth <token>` or `Authorization: Bearer <token>` header
+when authorization is enabled. No task-routing headers are needed.
+
+Task proxy strips the selector before forwarding the request. A URL ending at the
+selector reaches the service root. A suffix such as `/api/status?verbose=true`
+is forwarded with its query string.
+
 ## Annotating an operation
 
 To publish services from a regular YTsaurus operation, add the `task_proxy` annotation to its specification. `enabled` is required; `tasks_info` describes services by task name, service name, protocol, and zero-based job port index.

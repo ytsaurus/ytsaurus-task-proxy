@@ -57,23 +57,29 @@ func (s *authServer) Check(ctx context.Context, req *authv3.CheckRequest) (*auth
 	headers := httpAttrs.GetHeaders()
 	host := httpAttrs.GetHost()
 
-	task, err := s.findTaskByRequest(host, headers)
-	if err != nil {
-		defaultMetrics.ObserveAuthFailure(authReasonTaskLookup, nil)
-		s.logger.Warnf("failed to find task during auth check: %s", err)
-		return deniedResponse, nil
+	// Envoy supplies the operation ID from the matched path route. Client headers
+	// cannot change which operation is checked for that route.
+	operationID := req.GetAttributes().GetContextExtensions()[pathOperationIDContextKey]
+	if operationID == "" {
+		task, err := s.findTaskByRequest(host, headers)
+		if err != nil {
+			defaultMetrics.ObserveAuthFailure(authReasonTaskLookup, nil)
+			s.logger.Warnf("failed to find task during auth check: %s", err)
+			return deniedResponse, nil
+		}
+
+		// Skip auth for UI static assets on the legacy routes.
+		if task.service == "ui" && strings.HasPrefix(path, "/static") {
+			s.logger.Debugf("skip auth for 'ui' service for statics on path %s", path)
+			defaultMetrics.ObserveAuthSuccess(authReasonStaticBypass)
+			return okResponse, nil
+		}
+		operationID = task.operationID
 	}
 
-	// skip auth for UI services for statics; currently it is the case for SPYT UI
-	if task.service == "ui" && strings.HasPrefix(path, "/static") {
-		s.logger.Debugf("skip auth for 'ui' service for statics on path %s", path)
-		defaultMetrics.ObserveAuthSuccess(authReasonStaticBypass)
-		return okResponse, nil
-	}
+	s.logger.Debugf("auth for path %q, operation %q", path, operationID)
 
-	s.logger.Debugf("auth for path %q, task %v", path, task)
-
-	allowed, err := s.checkOperationPermission(ctx, task.operationID, headers)
+	allowed, err := s.checkOperationPermission(ctx, operationID, headers)
 	if err != nil {
 		s.logger.Errorf("error while checking operation permission: %v", err)
 		return deniedResponse, nil

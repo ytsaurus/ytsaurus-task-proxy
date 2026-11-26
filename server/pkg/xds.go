@@ -3,7 +3,11 @@ package pkg
 import (
 	"fmt"
 	"log"
+	"maps"
 	"net"
+	"net/url"
+	"regexp"
+	"slices"
 	"sort"
 	"time"
 
@@ -37,7 +41,9 @@ import (
 )
 
 const (
-	extAuthClusterName = "extAuthz"
+	extAuthClusterName        = "extAuthz"
+	extAuthFilterName         = "envoy.filters.http.ext_authz"
+	pathOperationIDContextKey = "task_proxy_path_operation_id"
 
 	websocketUpgradeType = "websocket"
 
@@ -71,9 +77,18 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 	var clusters []cachetypes.Resource
 	var vhosts []*routev3.VirtualHost
 
-	var defaultVhostRoutes []*routev3.Route
+	var defaultVhostRoutes, pathRoutes []*routev3.Route
+	authority := &routev3.HeaderMatcher{
+		Name: ":authority",
+		HeaderMatchSpecifier: &routev3.HeaderMatcher_SafeRegexMatch{
+			SafeRegexMatch: &matcherv3.RegexMatcher{
+				Regex: "(?i)" + regexp.QuoteMeta(baseDomain) + "(:[0-9]+)?",
+			},
+		},
+	}
 
-	for hash, task := range hashToTask {
+	for _, hash := range slices.Sorted(maps.Keys(hashToTask)) {
+		task := hashToTask[hash]
 		grpc := task.protocol == GRPC
 		vhostName := fmt.Sprintf("%s-%s-%s", task.operationID, task.taskName, task.service)
 
@@ -117,6 +132,10 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 				Action: action,
 			}},
 		})
+		for _, path := range taskRoutePaths(hash, task) {
+			pathRoutes = append(pathRoutes, makeTaskPathRoutes(path, task.operationID, authority, routeAction)...)
+		}
+
 		// ... or by custom header(-s)
 		defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 			Match: &routev3.RouteMatch{
@@ -151,6 +170,14 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		}
 	}
 
+	// Prefer a full operation/task/service path when its first segment is also a service hash.
+	sort.SliceStable(pathRoutes, func(i, j int) bool {
+		pathLength := func(route *routev3.Route) int {
+			return len(route.Match.GetPath()) + len(route.Match.GetPrefix())
+		}
+		return pathLength(pathRoutes[i]) > pathLength(pathRoutes[j])
+	})
+	defaultVhostRoutes = append(pathRoutes, defaultVhostRoutes...)
 	defaultVhostRoutes = append(defaultVhostRoutes, &routev3.Route{
 		Match: &routev3.RouteMatch{PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: "/"}},
 		Action: &routev3.Route_DirectResponse{
@@ -192,7 +219,7 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 	var httpFilters []*hcmv3.HttpFilter
 	if authEnabled {
 		httpFilters = append(httpFilters, &hcmv3.HttpFilter{
-			Name: "envoy.filters.http.ext_authz",
+			Name: extAuthFilterName,
 			ConfigType: &hcmv3.HttpFilter_TypedConfig{
 				TypedConfig: mustAny(authz),
 			},
@@ -290,6 +317,48 @@ func makeSnapshot(hashToTask map[string]Task, version string, baseDomain string,
 		return nil, err
 	}
 	return snap, snap.Consistent()
+}
+
+func taskRoutePaths(hash string, task Task) []string {
+	suffix := "/" + url.PathEscape(task.taskName) + "/" + url.PathEscape(task.service)
+	paths := []string{"/tasks/" + hash, "/tasks/" + task.operationID + suffix}
+	if task.operationAlias != "" {
+		paths = append(paths, "/tasks/"+url.PathEscape(task.operationAlias)+suffix)
+	}
+	return paths
+}
+
+func makeTaskPathRoutes(path, operationID string, authority *routev3.HeaderMatcher, upstream *routev3.RouteAction) []*routev3.Route {
+	action := proto.CloneOf(upstream)
+	action.PrefixRewrite = "/"
+	config := map[string]*anypb.Any{
+		extAuthFilterName: mustAny(&extauthzv3.ExtAuthzPerRoute{
+			Override: &extauthzv3.ExtAuthzPerRoute_CheckSettings{
+				CheckSettings: &extauthzv3.CheckSettings{
+					ContextExtensions: map[string]string{pathOperationIDContextKey: operationID},
+				},
+			},
+		}),
+	}
+	headers := []*routev3.HeaderMatcher{authority}
+	return []*routev3.Route{
+		{
+			Match: &routev3.RouteMatch{
+				PathSpecifier: &routev3.RouteMatch_Path{Path: path},
+				Headers:       headers,
+			},
+			Action:               &routev3.Route_Route{Route: action},
+			TypedPerFilterConfig: config,
+		},
+		{
+			Match: &routev3.RouteMatch{
+				PathSpecifier: &routev3.RouteMatch_Prefix{Prefix: path + "/"},
+				Headers:       headers,
+			},
+			Action:               &routev3.Route_Route{Route: action},
+			TypedPerFilterConfig: config,
+		},
+	}
 }
 
 func makeCluster(name string, host string, port uint32, grpc bool, resolveDomain bool, connectTimeout time.Duration) *clusterv3.Cluster {

@@ -200,5 +200,11 @@ func TestDiscoveryRetainedAndFreshTasksReachAllUpdaterOutputs(t *testing.T) {
 		require.True(t, domains[domain], domain)
 	}
 	require.False(t, domains["changed-worker-api.example.com"])
-	require.Equal(t, map[string]int{"0-0-0-1-worker-api-0": 4, "0-0-0-1-worker-ui-0": 4, "0-0-0-2-worker-api-0": 4, "0-0-0-2-worker-ui-0": 4}, routedClusters)
+	// Four domain and header routes plus six path routes per service.
+	require.Equal(t, map[string]int{
+		"0-0-0-1-worker-api-0": 10,
+		"0-0-0-1-worker-ui-0":  10,
+		"0-0-0-2-worker-api-0": 10,
+		"0-0-0-2-worker-ui-0":  10,
+	}, routedClusters)
 }

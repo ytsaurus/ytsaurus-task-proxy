@@ -1,7 +1,11 @@
 package pkg
 
 import (
+	"context"
 	"testing"
+
+	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
+	"go.ytsaurus.tech/yt/go/yt"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -247,4 +251,43 @@ func TestFindTaskByRequest(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckPathRoute(t *testing.T) {
+	server := CreateAuthServer(nil, "", &SimpleLogger{}, "", AuthCacheConfig{
+		Enabled: true, TTLSeconds: 60, Capacity: 10, MaxConcurrentBackendRequests: 1,
+	})
+	ctx := context.Background()
+	key := authCacheKey{
+		credentials: credentialsKey(&yt.TokenCredentials{Token: "test-token"}),
+		operationID: "1-2-3-4",
+	}
+	_, _, err := server.cache.GetOrLoad(ctx, key, func(context.Context) (bool, string, error) {
+		return true, "test-user", nil
+	})
+	require.NoError(t, err)
+
+	headers := map[string]string{"authorization": "OAuth test-token"}
+	req := &authv3.CheckRequest{Attributes: &authv3.AttributeContext{
+		ContextExtensions: map[string]string{pathOperationIDContextKey: key.operationID},
+		Request: &authv3.AttributeContext_Request{
+			Http: &authv3.AttributeContext_HttpRequest{
+				Host: "example.com", Path: "/tasks/alias/master/ui/", Headers: headers,
+			},
+		},
+	}}
+
+	resp, err := server.Check(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, okResponse, resp)
+
+	headers[idRouterHeaderName] = "different-task"
+	resp, err = server.Check(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, okResponse, resp)
+
+	delete(headers, "authorization")
+	resp, err = server.Check(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, deniedResponse, resp)
 }
