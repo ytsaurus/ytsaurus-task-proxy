@@ -75,9 +75,11 @@ type discoveryTableYT struct {
 	rows []TaskRow
 }
 
-func (c *discoveryTableYT) NodeExists(_ context.Context, path ypath.YPath, _ *ytsdk.NodeExistsOptions) (bool, error) {
+func (c *discoveryTableYT) CreateNode(_ context.Context, path ypath.YPath, nodeType ytsdk.NodeType, opts *ytsdk.CreateNodeOptions) (ytsdk.NodeID, error) {
 	require.Equal(c.t, ypath.Path("//proxy/services"), path)
-	return true, nil
+	require.Equal(c.t, ytsdk.NodeTable, nodeType)
+	require.True(c.t, opts.IgnoreExisting)
+	return ytsdk.NodeID{}, nil
 }
 func (c *discoveryTableYT) WriteTable(_ context.Context, path ypath.YPath, _ *ytsdk.WriteTableOptions) (ytsdk.TableWriter, error) {
 	require.Equal(c.t, ypath.Path("//proxy/services"), path)
