@@ -199,8 +199,9 @@ func (s *authServer) checkOperationPermission(ctx context.Context, operationID s
 		s.metrics.ObserveYTDuration("check_operation_permission", time.Since(permissionCheckStarted))
 		if err != nil {
 			s.logger.Infof("permission check failed: dur=%s, err=%v", time.Since(permissionCheckStarted), err)
-			reason := s.metrics.ObserveAuthYTError("permission_check", err)
-			return authPermissionResult{login: user, reason: reason}, err
+			kind, grpcCode := classifyInfrastructureError(err)
+			s.metrics.observeAuthYTInfrastructureError("permission_check", kind, grpcCode)
+			return authPermissionResult{login: user, reason: infrastructureAuthReason(kind)}, err
 		}
 
 		reason := authReasonPermissionDenied

@@ -210,16 +210,19 @@ func (m *Metrics) ObserveAuthSuccess(reason string) {
 }
 
 func (m *Metrics) ObserveAuthFailure(reason string, err error) string {
-	m.authErrors.WithLabelValues(reason).Inc()
-
 	if err == nil {
+		m.authErrors.WithLabelValues(reason).Inc()
 		m.authFailures.WithLabelValues(reason).Inc()
 		return reason
 	}
 
 	kind, grpcCode := classifyInfrastructureError(err)
-	m.authInfrastructureErrors.WithLabelValues(reason, kind, grpcCode).Inc()
+	return m.observeAuthInfrastructureFailure(reason, kind, grpcCode)
+}
 
+func (m *Metrics) observeAuthInfrastructureFailure(stage, kind, grpcCode string) string {
+	m.authErrors.WithLabelValues(stage).Inc()
+	m.authInfrastructureErrors.WithLabelValues(stage, kind, grpcCode).Inc()
 	failureReason := infrastructureAuthReason(kind)
 	m.authFailures.WithLabelValues(failureReason).Inc()
 	return failureReason
@@ -236,8 +239,18 @@ func (m *Metrics) ObserveYTDuration(request string, duration time.Duration) {
 }
 
 func (m *Metrics) ObserveAuthYTError(stage string, err error) string {
-	m.ObserveYTError(stage, err)
-	return m.ObserveAuthFailure(stage, err)
+	if err == nil {
+		m.ObserveYTError(stage, nil)
+		return m.ObserveAuthFailure(stage, nil)
+	}
+	kind, grpcCode := classifyInfrastructureError(err)
+	m.observeAuthYTInfrastructureError(stage, kind, grpcCode)
+	return infrastructureAuthReason(kind)
+}
+
+func (m *Metrics) observeAuthYTInfrastructureError(stage, kind, grpcCode string) {
+	m.ytRequestError.WithLabelValues(stage, kind, grpcCode).Inc()
+	m.observeAuthInfrastructureFailure(stage, kind, grpcCode)
 }
 
 func (m *Metrics) ObserveAuthCacheHit() {

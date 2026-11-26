@@ -60,9 +60,10 @@ The Helm defaults are 2 seconds for connecting to a job, 15 seconds for a comple
 Task Proxy exposes `yt_task_proxy_user_requests_total{user,cache,auth_result}` on the
 server's `/metrics/prometheus` endpoint. With `monitoring.enabled: true`, the
 Helm chart scrapes server and Envoy metrics through the internal
-`<release>-metrics` service. The `job` label keeps the release name and the
-`service` label uses the new service name. Update custom scrape targets and
-queries that filter on the old service name.
+`<release>-metrics` service. Run one Task Proxy release per namespace.
+The `job` label keeps the release name and the `service` label uses the new
+service name. Update custom scrape targets and queries that filter on the old
+service name.
 
 The counter increments once for each authorization request with a verified
 YTsaurus login, including requests denied by the operation permission check.
@@ -106,8 +107,11 @@ sum by (cache, auth_result) (increase(yt_task_proxy_user_requests_total{user="al
 
 Calculate `rate` or `increase` for each series before summing across replicas
 so that Prometheus can account for counter resets. `increase` extrapolates
-between scrapes and may return a fractional count. A newly observed series
-needs at least two samples for these queries.
+between scrapes and may return a fractional count. For each new series,
+Prometheus uses the first scrape as the starting value and calculates changes
+from subsequent samples. For example, if the first denial creates a series and
+every scrape reads `1`, the counter still shows one denial, but `increase`
+reports zero. This applies per replica and combination of labels.
 
 Example Prometheus alerting rule for sustained load from one user:
 
@@ -123,6 +127,9 @@ groups:
 ```
 
 ## Development
+
+Run the PromQL checks for newly observed user request series with
+`promtool test rules tests/promql/user_requests_test.yaml`.
 
 Install chart to cluster from local directory using:
 
