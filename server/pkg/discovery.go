@@ -315,21 +315,8 @@ func (d *taskDiscovery) processTaskProxyAnnotatedOperation(ctx context.Context, 
 }
 
 func (d *taskDiscovery) save(ctx context.Context, hashToTask map[string]Task) error {
-	nodeExistsStarted := time.Now()
-	exists, err := d.yt.NodeExists(ctx, d.tablePath, nil)
-	defaultMetrics.ObserveYTDuration("node_exists", time.Since(nodeExistsStarted))
-	if err != nil {
-		defaultMetrics.ObserveYTError("node_exists", err)
+	if err := createCypressNode(ctx, d.yt, d.tablePath, ytsdk.NodeTable); err != nil {
 		return err
-	}
-	if !exists {
-		createNodeStarted := time.Now()
-		_, err := d.yt.CreateNode(ctx, d.tablePath, ytsdk.NodeTable, nil)
-		defaultMetrics.ObserveYTDuration("create_node", time.Since(createNodeStarted))
-		if err != nil {
-			defaultMetrics.ObserveYTError("create_node", err)
-			return err
-		}
 	}
 	writeTableStarted := time.Now()
 	w, err := d.yt.WriteTable(ctx, d.tablePath, nil)

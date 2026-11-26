@@ -124,6 +124,12 @@ func main() {
 		}
 	}
 
+	if err := pkg.WriteConfig(ctx, ytClient, args.dirPath, pkg.TaskProxyConfig{
+		BaseDomain: args.baseDomain,
+	}); err != nil {
+		log.Fatalf("failed to initialize task proxy Cypress nodes: %v", err)
+	}
+
 	cache := cachev3.NewSnapshotCache(true, cachev3.IDHash{}, logger)
 
 	taskDiscovery := pkg.CreateTaskDiscovery(args.baseDomain, args.dirPath, ytClient, &logger)
