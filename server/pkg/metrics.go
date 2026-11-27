@@ -18,6 +18,7 @@ import (
 )
 
 type Metrics struct {
+	userRequests             *prometheus.CounterVec
 	authSuccesses            *prometheus.CounterVec
 	authFailures             *prometheus.CounterVec
 	authErrors               *prometheus.CounterVec
@@ -60,6 +61,13 @@ const (
 
 func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	m := &Metrics{
+		userRequests: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "yt_task_proxy_user_requests_total",
+				Help: "Task Proxy authorization requests by authenticated YTsaurus user, cache status, and authorization result.",
+			},
+			[]string{"user", "cache", "auth_result"},
+		),
 		authSuccesses: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "yt_task_proxy_auth_success_total",
@@ -164,6 +172,7 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	}
 
 	registerer.MustRegister(
+		m.userRequests,
 		m.authSuccesses,
 		m.authFailures,
 		m.authErrors,
@@ -184,21 +193,36 @@ func NewMetrics(registerer prometheus.Registerer) *Metrics {
 	return m
 }
 
+// observeUserRequest counts requests with a verified YTsaurus login.
+func (m *Metrics) observeUserRequest(result authPermissionResult, cacheStatus authCacheStatus) {
+	if result.login == "" {
+		return
+	}
+	reason := result.reason
+	if result.allowed() {
+		reason = "allowed"
+	}
+	m.userRequests.WithLabelValues(result.login, string(cacheStatus), reason).Inc()
+}
+
 func (m *Metrics) ObserveAuthSuccess(reason string) {
 	m.authSuccesses.WithLabelValues(reason).Inc()
 }
 
 func (m *Metrics) ObserveAuthFailure(reason string, err error) string {
-	m.authErrors.WithLabelValues(reason).Inc()
-
 	if err == nil {
+		m.authErrors.WithLabelValues(reason).Inc()
 		m.authFailures.WithLabelValues(reason).Inc()
 		return reason
 	}
 
 	kind, grpcCode := classifyInfrastructureError(err)
-	m.authInfrastructureErrors.WithLabelValues(reason, kind, grpcCode).Inc()
+	return m.observeAuthInfrastructureFailure(reason, kind, grpcCode)
+}
 
+func (m *Metrics) observeAuthInfrastructureFailure(stage, kind, grpcCode string) string {
+	m.authErrors.WithLabelValues(stage).Inc()
+	m.authInfrastructureErrors.WithLabelValues(stage, kind, grpcCode).Inc()
 	failureReason := infrastructureAuthReason(kind)
 	m.authFailures.WithLabelValues(failureReason).Inc()
 	return failureReason
@@ -215,8 +239,18 @@ func (m *Metrics) ObserveYTDuration(request string, duration time.Duration) {
 }
 
 func (m *Metrics) ObserveAuthYTError(stage string, err error) string {
-	m.ObserveYTError(stage, err)
-	return m.ObserveAuthFailure(stage, err)
+	if err == nil {
+		m.ObserveYTError(stage, nil)
+		return m.ObserveAuthFailure(stage, nil)
+	}
+	kind, grpcCode := classifyInfrastructureError(err)
+	m.observeAuthYTInfrastructureError(stage, kind, grpcCode)
+	return infrastructureAuthReason(kind)
+}
+
+func (m *Metrics) observeAuthYTInfrastructureError(stage, kind, grpcCode string) {
+	m.ytRequestError.WithLabelValues(stage, kind, grpcCode).Inc()
+	m.observeAuthInfrastructureFailure(stage, kind, grpcCode)
 }
 
 func (m *Metrics) ObserveAuthCacheHit() {

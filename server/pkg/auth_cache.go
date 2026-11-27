@@ -32,10 +32,19 @@ func credentialsKey(creds ytsdk.Credentials) string {
 }
 
 type authCacheEntry struct {
-	allowed   bool
+	// This is the operation permission result. The upcoming rate limiter will
+	// make its decision per request after the cache lookup.
+	result    authPermissionResult
 	expiresAt time.Time
-	login     string
 }
+
+type authCacheStatus string
+
+const (
+	authCacheHit      authCacheStatus = "hit"
+	authCacheMiss     authCacheStatus = "miss"
+	authCacheDisabled authCacheStatus = "disabled"
+)
 
 type authCacheItem struct {
 	key   authCacheKey
@@ -86,41 +95,43 @@ func newAuthPermissionCache(cfg AuthCacheConfig, logger *SimpleLogger) *authPerm
 func (c *authPermissionCache) GetOrLoad(
 	ctx context.Context,
 	key authCacheKey,
-	loadFn func(context.Context) (bool, string, error),
-) (bool, string, error) {
+	loadFn func(context.Context) (authPermissionResult, error),
+) (authPermissionResult, authCacheStatus, error) {
 	if c == nil {
-		return loadFn(ctx)
+		result, err := loadFn(ctx)
+		return result, authCacheDisabled, err
 	}
 
-	if allowed, ok, needsRefresh, login := c.get(key); ok {
+	if result, ok, needsRefresh := c.get(key); ok {
 		c.metrics.ObserveAuthCacheHit()
-		c.logger.Debugf("auth cache hit: operation_id=%q user=%q allowed=%v", key.operationID, login, allowed)
+		c.logger.Debugf("auth cache hit: operation_id=%q user=%q allowed=%v", key.operationID, result.login, result.allowed())
 		if needsRefresh {
-			c.logger.Debugf("auth cache preventive refresh scheduled: operation_id=%q, user=%q", key.operationID, login)
-			c.triggerRefresh(key, login, loadFn)
+			c.logger.Debugf("auth cache preventive refresh scheduled: operation_id=%q, user=%q", key.operationID, result.login)
+			c.triggerRefresh(key, result.login, loadFn)
 		}
-		return allowed, login, nil
+		return result, authCacheHit, nil
 	}
 	c.metrics.ObserveAuthCacheMiss()
 	c.logger.Debugf("auth cache miss: operation_id=%q user=%q", key.operationID, "unknown")
 
-	return c.loadOnMiss(ctx, key, loadFn)
+	result, err := c.loadOnMiss(ctx, key, loadFn)
+	return result, authCacheMiss, err
 }
 
-func (c *authPermissionCache) get(key authCacheKey) (allowed bool, ok bool, needsRefresh bool, login string) {
+func (c *authPermissionCache) get(key authCacheKey) (result authPermissionResult, ok bool, needsRefresh bool) {
 	c.lock()
 	defer c.unlock()
 
 	elem, exists := c.entries[key]
 	if !exists {
-		return false, false, false, ""
+		return authPermissionResult{}, false, false
 	}
 
 	item := elem.Value.(*authCacheItem)
 	now := c.nowFn()
 	if c.isExpired(item.entry, now) {
 		c.removeElement(elem)
-		return false, false, false, ""
+		return authPermissionResult{}, false, false
 	}
 
 	c.lru.MoveToFront(elem)
@@ -134,13 +145,13 @@ func (c *authPermissionCache) get(key authCacheKey) (allowed bool, ok bool, need
 		}
 	}
 
-	return item.entry.allowed, true, needsRefresh, item.entry.login
+	return item.entry.result, true, needsRefresh
 }
 
 func (c *authPermissionCache) triggerRefresh(
 	key authCacheKey,
 	login string,
-	loadFn func(context.Context) (bool, string, error),
+	loadFn func(context.Context) (authPermissionResult, error),
 ) {
 	started, _ := c.tryStartLoad(key, 1)
 	if !started {
@@ -155,21 +166,21 @@ func (c *authPermissionCache) triggerRefresh(
 	c.logger.Debugf("auth cache preventive refresh started: operation_id=%q user=%q", key.operationID, login)
 
 	go func() {
-		_, _, _ = c.executeLoad(context.Background(), key, loadFn)
+		_, _ = c.executeLoad(context.Background(), key, loadFn)
 	}()
 }
 
 func (c *authPermissionCache) loadOnMiss(
 	ctx context.Context,
 	key authCacheKey,
-	loadFn func(context.Context) (bool, string, error),
-) (bool, string, error) {
+	loadFn func(context.Context) (authPermissionResult, error),
+) (authPermissionResult, error) {
 	for {
-		if allowed, ok, needsRefresh, login := c.get(key); ok {
+		if result, ok, needsRefresh := c.get(key); ok {
 			if needsRefresh {
-				c.triggerRefresh(key, login, loadFn)
+				c.triggerRefresh(key, result.login, loadFn)
 			}
-			return allowed, login, nil
+			return result, nil
 		}
 
 		started, waitCh := c.tryStartLoad(key, c.maxConcurrentLoadsPerKeyMiss)
@@ -189,7 +200,7 @@ func (c *authPermissionCache) loadOnMiss(
 			// Some in-flight load has completed, retry from cache.
 		case <-ctx.Done():
 			c.metrics.DecAuthCacheWaitingRequests()
-			return false, "", ctx.Err()
+			return authPermissionResult{}, ctx.Err()
 		}
 		c.metrics.DecAuthCacheWaitingRequests()
 	}
@@ -228,21 +239,20 @@ func (c *authPermissionCache) hasLoadInFlightLocked(key authCacheKey) bool {
 func (c *authPermissionCache) executeLoad(
 	ctx context.Context,
 	key authCacheKey,
-	loadFn func(context.Context) (bool, string, error),
-) (bool, string, error) {
-	allowed, login, err := loadFn(ctx)
+	loadFn func(context.Context) (authPermissionResult, error),
+) (authPermissionResult, error) {
+	result, err := loadFn(ctx)
 	if err == nil {
-		c.logger.Debugf("auth cache backend load succeeded: operation_id=%q user=%q allowed=%v", key.operationID, login, allowed)
+		c.logger.Debugf("auth cache backend load succeeded: operation_id=%q user=%q allowed=%v", key.operationID, result.login, result.allowed())
 		c.set(key, authCacheEntry{
-			allowed:   allowed,
+			result:    result,
 			expiresAt: c.expiration(),
-			login:     login,
 		})
 	} else {
-		c.logger.Debugf("auth cache backend load failed: operation_id=%q user=%q err=%v", key.operationID, login, err)
+		c.logger.Debugf("auth cache backend load failed: operation_id=%q user=%q err=%v", key.operationID, result.login, err)
 	}
 	c.finishLoad(key)
-	return allowed, login, err
+	return result, err
 }
 
 func (c *authPermissionCache) finishLoad(key authCacheKey) {

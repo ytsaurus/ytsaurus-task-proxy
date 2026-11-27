@@ -24,6 +24,8 @@ func TestMetricsHandler(t *testing.T) {
 	metrics.ObserveAuthFailure(authReasonPermissionDenied, nil)
 	metrics.ObserveAuthYTError("permission_check", context.DeadlineExceeded)
 	metrics.ObserveAuthFailure(authReasonTaskLookup, nil)
+	metrics.observeUserRequest(authPermissionResult{login: "alice", reason: authReasonAuthorized}, authCacheHit)
+	metrics.observeUserRequest(authPermissionResult{login: "alice", reason: authReasonAuthorized}, authCacheHit)
 	metrics.ObserveAuthCacheHit()
 	metrics.ObserveAuthCacheMiss()
 	metrics.IncAuthCacheEntries()
@@ -45,6 +47,7 @@ func TestMetricsHandler(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	body := rec.Body.String()
+	require.Contains(t, body, `yt_task_proxy_user_requests_total{auth_result="allowed",cache="hit",user="alice"} 2`)
 	require.True(t, strings.Contains(body, `yt_task_proxy_auth_success_total{reason="authorized"} 1`))
 	require.True(t, strings.Contains(body, `yt_task_proxy_auth_failed_total{reason="permission_denied"} 1`))
 	require.True(t, strings.Contains(body, `yt_task_proxy_auth_failed_total{reason="infra_context_deadline_exceeded"} 1`))
